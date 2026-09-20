@@ -7,7 +7,7 @@
 依赖驱动 + 资源约束的自动排期 · 冲突扫描 · 甘特 / 资源泳道 / 总览多视图
 纯前端、可自托管、数据留在自己手里
 
-*An open-source, self-hosted alternative to Microsoft Project — dependency-driven auto-scheduling with resource constraints, conflict detection and multi-view planning, right in the browser.*
+*An open-source, self-hosted **gantt chart & project scheduling** tool — a browser-based alternative to Microsoft Project, with dependency-driven auto-scheduling, resource constraints, conflict detection and multi-view planning.*
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Tests](https://img.shields.io/badge/tests-271%20passed-brightgreen.svg)

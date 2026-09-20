@@ -1,0 +1,4 @@
+# GitHub linguist 标注：第三方库与构建产物不计入本仓库的语言统计，
+# 避免仓库语言占比被一份压缩过的 supabase UMD 包带偏。
+lib/supabase.js               linguist-vendored
+public/export-template.html   linguist-generated
