@@ -1,0 +1,37 @@
+{
+  "name": "opsplan",
+  "private": true,
+  "version": "1.0.0",
+  "description": "浏览器里的 Microsoft Project —— 依赖驱动 + 资源约束的自动排期、冲突扫描与多视图项目作战地图（原生 JS + Supabase）",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mlin4020/OpsPlan.git"
+  },
+  "homepage": "https://github.com/mlin4020/OpsPlan#readme",
+  "bugs": {
+    "url": "https://github.com/mlin4020/OpsPlan/issues"
+  },
+  "keywords": [
+    "gantt",
+    "project-management",
+    "scheduler",
+    "resource-management",
+    "supabase",
+    "vanilla-js",
+    "vite"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:export": "vite build --mode export",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "vitest": "^2.0.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}

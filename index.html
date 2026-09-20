@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0e7490">
+<title>OpsPlan · 排期管理平台</title>
+<script src="lib/supabase.js"></script>
+<script src="supabase-config.js"></script>
+<style>
+:root{--ink:#0f1729;--muted:#64748b;--line:#e2e8f0;--bg:#eef1f7;--accent:#0e7490;--accent-strong:#0a566b;--accent-soft:#eaf7fa;--accent-line:#c1e6f0;--accent-ink:#094758;--accent-ring:rgba(14,116,144,.18);--hero:#0e7490;--hero-deep:#041a20;--hero-soft:#d2edf4;--blue:var(--accent);--red:#ef4444;--amber:#f59e0b;--shadow:0 8px 30px rgba(15,23,42,.10)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+#viewLogin{position:fixed;inset:0;background:linear-gradient(135deg,var(--hero-deep),var(--hero));display:flex;align-items:center;justify-content:center;z-index:20}
+.login-card{background:#fff;border-radius:16px;padding:36px 40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.brand{font-size:10px;letter-spacing:3px;color:var(--accent);font-weight:700;margin-bottom:6px}
+.login-card h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:#334155;font-weight:600;margin-bottom:5px}
+.field input,.field select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;outline:none;transition:border-color .15s;font-family:inherit;background:#fff}
+.field input:focus,.field select:focus{border-color:var(--blue)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:13px;border:1px solid var(--line);background:#fff;color:#334155;border-radius:8px;padding:8px 16px;cursor:pointer;font-weight:600;transition:all .15s;font-family:inherit}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{filter:brightness(1.08);color:#fff}
+.btn.danger{color:var(--red);border-color:#fecaca}
+.btn.danger:hover{background:#fef2f2;border-color:var(--red);color:var(--red)}
+.btn.ghost{color:var(--muted);font-weight:500}
+.btn.ghost:hover{border-color:#8b5cf6;color:#8b5cf6}
+.btn.block{width:100%}
+.btn.sm{padding:5px 10px;font-size:12px}
+.btn.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
+.err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
+.hint{font-size:11px;color:var(--muted);text-align:center;margin-top:16px}
+.toggle-link{color:var(--blue);cursor:pointer;font-weight:600}
+.toggle-link:hover{text-decoration:underline}
+#viewMain{display:none;min-height:100vh}
+.hero{background:linear-gradient(135deg,var(--hero-deep),var(--hero));color:#fff;padding:14px 28px;display:flex;align-items:center;gap:18px}
+.hero .brand{color:var(--hero-soft);margin:0}
+.hero h2{font-size:16px;font-weight:800}
+.hero .user{margin-left:auto;font-size:12px;color:var(--hero-soft);display:flex;align-items:center;gap:10px}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.container{max-width:1080px;margin:0 auto;padding:26px 28px}
+.toolbar{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.toolbar h3{font-size:16px;font-weight:800}
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.proj-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px;box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s;display:flex;flex-direction:column;gap:10px}
+.proj-card:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(15,23,42,.14)}
+.proj-name{font-size:15px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px}
+.owner-tag{font-size:11px;background:var(--accent-soft);color:var(--accent-ink);border-radius:6px;padding:2px 8px;font-weight:600;white-space:nowrap}
+.time{font-size:11px;color:var(--muted)}
+.proj-actions{display:flex;gap:8px;margin-top:4px}
+.spacer{flex:1}
+.badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 6px;border-radius:9px;background:var(--blue);color:#fff;font-size:10px;font-weight:800}
+.badge.admin{background:var(--amber)}
+.empty{padding:50px;text-align:center;color:var(--muted);font-size:13px;background:#fff;border:1px dashed var(--line);border-radius:12px}
+.modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50}
+.modal-mask.show{display:flex}
+.modal{background:#fff;border-radius:14px;padding:24px 28px;width:400px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.modal h3{font-size:15px;font-weight:800;margin-bottom:16px}
+.modal-foot{display:flex;align-items:center;gap:10px;margin-top:18px}
+.admin-section{margin-top:26px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+.admin-section h4{font-size:13px;font-weight:800;margin-bottom:12px;color:#334155}
+.user-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #f1f4f9;font-size:12px}
+.user-row:last-child{border-bottom:none}
+/* 移动端：顶栏粘顶两行式、项目卡片单列、按钮全部拉满到 44px 触摸目标 */
+@media(max-width:640px){
+  /* ---- 顶栏：标题一行、用户信息一行，滚动时保持可见 ---- */
+  .hero{padding:10px 14px;gap:8px 10px;flex-wrap:wrap;position:sticky;top:0;z-index:10;
+    padding-top:calc(10px + env(safe-area-inset-top))}
+  .hero h2{font-size:16px}
+  .hero .user{margin-left:0;flex:1 1 100%;justify-content:flex-start;gap:8px}
+  .hero .user>span#lblUser{max-width:36vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hero .btn{padding:8px 13px;font-size:12.5px;min-height:38px}
+
+  /* ---- 内容区 ---- */
+  .container{padding:14px 14px calc(24px + env(safe-area-inset-bottom))}
+  .toolbar{flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .toolbar h3{font-size:15px}
+  .toolbar .btn{min-height:42px;padding:9px 15px;font-size:13.5px}
+
+  /* ---- 项目卡片：操作按钮均分整行，点起来不费劲 ---- */
+  .proj-grid{grid-template-columns:1fr;gap:12px}
+  .proj-card{padding:15px 16px;gap:11px;border-radius:14px}
+  .proj-card:hover{transform:none;box-shadow:var(--shadow)}
+  .proj-name{font-size:15px;flex-wrap:wrap}
+  .proj-actions{gap:8px;margin-top:2px}
+  .proj-actions .btn{flex:1 1 0;min-height:44px;font-size:13.5px;justify-content:center}
+
+  /* ---- 弹窗 ---- */
+  .modal{width:calc(100vw - 24px);padding:18px 16px;border-radius:14px}
+  .modal h3{font-size:16px}
+  .modal .field input,.modal .field select{min-height:46px;font-size:15px}
+  .modal-foot{flex-wrap:wrap;gap:8px}
+  .modal-foot .btn{flex:1 1 auto;min-height:46px;font-size:14px}
+  .modal-foot .spacer{display:none}
+
+  /* ---- 用户管理 ---- */
+  .admin-section{padding:14px 16px;border-radius:14px}
+  .admin-section .toolbar{margin-bottom:10px}
+  .admin-section .toolbar .btn{width:100%}
+  .user-row{flex-wrap:wrap;gap:8px;padding:11px 0;font-size:12.5px}
+  .user-row .btn{min-height:38px;padding:7px 13px;font-size:12.5px}
+
+  /* ---- 登录 / 注册 ---- */
+  .login-card{width:calc(100vw - 32px);max-width:400px;padding:26px 20px;border-radius:14px}
+  .login-card h1{font-size:19px}
+  .login-sub{margin-bottom:20px}
+  .field{margin-bottom:16px}
+  .field label{font-size:13px}
+  .field input,.field select{min-height:46px;font-size:15px}
+  .btn{padding:10px 16px;font-size:14px;min-height:44px}
+  .btn.sm{padding:8px 12px;font-size:12.5px;min-height:36px}
+  .hint{margin-top:18px;font-size:12px}
+}
+</style>
+</head>
+<body>
+
+<div id="viewLogin">
+  <div class="login-card">
+    <div class="brand"></div>
+    <h1>OpsPlan</h1>
+    <div class="login-sub">登录后进入项目列表</div>
+    <form id="loginForm" autocomplete="on">
+      <div class="field"><label>邮箱</label><input type="email" id="inpLoginEmail" placeholder="you@company.com" required></div>
+      <div class="field"><label>密码</label><input type="password" id="inpLoginPwd" placeholder="••••••••" required></div>
+      <button class="btn primary block" type="submit" id="btnLogin">登 录</button>
+      <div class="err" id="loginErr"></div>
+      <div class="hint">没有账号？<span class="toggle-link" id="linkToReg">注册</span></div>
+    </form>
+    <form id="regForm" autocomplete="on" style="display:none">
+      <div class="field"><label>姓名</label><input type="text" id="inpRegName" placeholder="张三"></div>
+      <div class="field"><label>邮箱</label><input type="email" id="inpRegEmail" required></div>
+      <div class="field"><label>密码</label><input type="password" id="inpRegPwd" minlength="6" required></div>
+      <button class="btn primary block" type="submit" id="btnReg">注 册</button>
+      <div class="err" id="regErr"></div>
+      <div class="hint">已有账号？<span class="toggle-link" id="linkToLogin">返回登录</span></div>
+    </form>
+  </div>
+</div>
+
+<div id="viewMain">
+  <div class="hero">
+    <span class="brand"></span>
+    <h2>项目管理平台</h2>
+    <div class="user">
+      <span id="lblRole" class="badge admin" style="display:none">管理员</span>
+      <span class="avatar" id="lblAvatar">?</span>
+      <span id="lblUser">--</span>
+      <button class="btn ghost" id="btnLogout" style="color:var(--hero-soft);border-color:rgba(255,255,255,.28)">退出登录</button>
+    </div>
+  </div>
+  <div class="container">
+    <div class="toolbar">
+      <h3>项目</h3>
+      <span class="spacer"></span>
+      <button class="btn primary" id="btnNewProj">+ 新建项目</button>
+      <button class="btn ghost" id="btnReload">刷新</button>
+    </div>
+    <div class="proj-grid" id="projGrid"><div class="empty">加载中…</div></div>
+
+    <div class="admin-section" id="adminSection" style="display:none">
+      <h4>用户管理（管理员）</h4>
+      <div class="toolbar" style="margin-bottom:8px">
+        <button class="btn sm" id="btnNewUser">+ 创建账号</button>
+        <span class="spacer"></span>
+      </div>
+      <div id="userList"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="maskNewProj">
+  <div class="modal">
+    <h3>新建项目</h3>
+    <div class="field"><label>项目名称</label><input type="text" id="inpNewProjName" placeholder=""></div>
+    <div class="field" id="rowNewProjOwner"><label>负责人（默认本人）</label><select id="selNewProjOwner"></select></div>
+    <div class="modal-foot">
+      <button class="btn primary" id="btnNewProjSave">创建</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="btnNewProjCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="maskNewUser">
+  <div class="modal">
+    <h3>创建账号</h3>
+    <div class="field"><label>姓名</label><input type="text" id="inpNuName" placeholder="张三"></div>
+    <div class="field"><label>邮箱</label><input type="email" id="inpNuEmail" required></div>
+    <div class="field"><label>初始密码</label><input type="password" id="inpNuPwd" minlength="6" required></div>
+    <div class="err" id="nuErr"></div>
+    <div class="modal-foot">
+      <button class="btn primary" id="btnNuSave">创建</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="btnNuCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="maskEditProj">
+  <div class="modal">
+    <h3>编辑项目</h3>
+    <div class="field"><label>项目名称</label><input type="text" id="inpEditProjName"></div>
+    <div class="field"><label>负责人</label><select id="selEditProjOwner"></select></div>
+    <div class="err" id="editProjErr"></div>
+    <div class="modal-foot">
+      <button class="btn primary" id="btnEditProjSave">保存</button>
+      <button class="btn danger" id="btnDelProj">删除项目</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="btnEditProjCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+  <script type="module" src="/src/main-index.js"></script>
+</body>
+</html>

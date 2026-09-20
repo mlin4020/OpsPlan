@@ -1,0 +1,27 @@
+# IDE / 工具数据
+.codebuddy/
+.workbuddy/
+.superpowers/
+.shots/
+
+# 本地验证临时产物
+_dom-*
+_smoke-out.txt
+
+# 依赖与构建产物
+node_modules/
+dist/
+.dsh/*
+DSH-*
+vitest-out.txt
+vite-dev*.log
+
+# 本地私有配置（含真实 Supabase 项目地址与 anon key，勿提交）
+# 新环境请复制 supabase-config.example.js 为 supabase-config.js 后填写
+supabase-config.js
+
+# Vite dev server 临时产物（依赖预构建时会落在项目根目录）
+*.timestamp-*.mjs
+
+# 发布平台标记文件（自动生成，无需入库）
+.wbapp_*.genie

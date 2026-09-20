@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpsPlan · 排期计划（只读查看）</title>
+</head>
+<body>
+<!-- 导出数据注入点：运行时由 utils/export.js 将 __PLAN_DATA__ 替换为当前排期 JSON。
+     未替换（直接打开模板）时 main-standalone.js 显示空态提示，不回退默认数据。 -->
+<script type="application/json" id="plan-data">__PLAN_DATA__</script>
+<script type="module" src="/src/main-standalone.js"></script>
+</body>
+</html>
