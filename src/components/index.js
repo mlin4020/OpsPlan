@@ -21,6 +21,7 @@ import { isReadonly, enterReadonly } from '../utils/readonly.js';
 import { PNAME as defaultPNAME } from '../core/default-data.js';
 import { bindToolbar } from './toolbar.js';
 import { bindWorkFilter } from './work-filter.js';
+import { bindVersionPage } from './version-page.js';
 import { bindDrawers } from './drawers.js';
 import { bindModals } from './modals.js';
 import { bindResLib } from './reslib.js';
@@ -61,6 +62,8 @@ export function bindAll(rawDeps) {
   const reslib = bindResLib(deps);
   // 资源工作视图的筛选条（委托在 #gantt 上，只绑一次；导出单文件入口自行调用同一个函数）
   const workFilter = bindWorkFilter(deps);
+  // 版本（迭代）页面：同样把 [data-ver-*] 委托在 #gantt 上，一次绑定
+  const versionPage = bindVersionPage(deps);
   const setSync = bindSetSync(deps);
   const themePicker = bindThemePicker(deps);
   deps.reslib = reslib;  // 供抽屉内「管理资源」入口点击时调用
@@ -113,6 +116,8 @@ export function bindAll(rawDeps) {
     // 优先关闭上下文菜单（由 context-menu 自身监听，但兜底关闭）
     // 弹窗 > 抽屉 > 上下文菜单
     // 需求抽屉与任务抽屉同为 .drawer（用 open 态），排在弹窗之后、抽屉之前
+    const verModal = doc.getElementById('verModal');
+    if (verModal && verModal.classList.contains('show')) { versionPage.closeModal(); return; }
     const modNew = doc.getElementById('modNewDrawer');
     if (modNew && modNew.classList.contains('open')) { modals.closeNewModModal(); return; }
     const themeModal = doc.getElementById('themeModal');
@@ -139,6 +144,7 @@ export function bindAll(rawDeps) {
     modals,
     reslib,
     workFilter,
+    versionPage,
     themePicker,
     setSync,
     loading: { showLoading: () => showLoading(doc), hideLoading: () => hideLoading(doc) },

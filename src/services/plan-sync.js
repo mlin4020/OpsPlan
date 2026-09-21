@@ -29,7 +29,10 @@ function buildPayload({ planStore, userStore }) {
     start: st.start ? fmt(st.start) : undefined,
     end: st.end ? fmt(st.end) : undefined,
     modules: st.modules,
-    resources: st.resources
+    resources: st.resources,
+    // 版本（迭代）：顶层数组，必须显式带上 —— 载荷是白名单式的，
+    // 漏了会出现"我这有版本、同事打开没有"却毫无报错的静默丢数据
+    versions: st.versions
   };
 }
 
@@ -56,7 +59,7 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
         const plan = data.plan;
         // 空项目：plan 存在但 modules 为空数组（或缺失）→ 视为有效空项目（不回退默认数据）
         if (!Array.isArray(plan.modules)) {
-          planStore.set({ modules: [], resources: [] });
+          planStore.set({ modules: [], resources: [], versions: [] });
           if (schedRef && typeof schedRef.collect === 'function') schedRef.collect();
           if (schedRef && typeof schedRef.resetHistory === 'function') schedRef.resetHistory();
           if (schedRef && typeof schedRef.recordInitial === 'function') schedRef.recordInitial();
@@ -66,7 +69,9 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
         if (plan.calcVer !== CALC_VER) return false;   // 算法版本不符，服务端数据作废
         planStore.set({
           modules: plan.modules,
-          resources: Array.isArray(plan.resources) && plan.resources.length ? plan.resources : planStore.state.resources
+          resources: Array.isArray(plan.resources) && plan.resources.length ? plan.resources : planStore.state.resources,
+          // 服务端老数据没有 versions（功能上线前保存的）→ 空列表；有则整体替换
+          versions: Array.isArray(plan.versions) ? plan.versions : []
         });
         if (schedRef && typeof schedRef.collect === 'function') schedRef.collect();
         // 项目周期自动推导：以后端任务日期为准，忽略服务器保存的历史 start/end

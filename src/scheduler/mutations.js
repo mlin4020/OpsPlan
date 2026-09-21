@@ -11,6 +11,7 @@ import { F } from './planning.js';
 import { fmt, addDays } from '../core/dates.js';
 import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
 import { milestoneName } from '../core/mod-tag.js';
+import { newVersionId, versionOfMap } from '../core/versions.js';
 import { userStore } from '../store/user-store.js';
 
 // 只读守卫：编辑类入口统一从这里过（throw 语义用于"新增"类，其余静默 return）
@@ -368,6 +369,14 @@ export function createMutations(ctx) {
       const newName = (opts.name || '').trim();
       if (!newName) throw new Error('需求名称不能为空');
       if (newName !== mo.name && (getState().modules || []).some(m => m.name === newName)) throw new Error('需求已存在：' + newName);
+      // 版本成员是用需求名引用的 → 改名必须同步版本名单，
+      // 否则该需求会从版本里"凭空消失"（版本卡少一个成员，且无任何报错）
+      if (newName !== mo.name) {
+        const oldName = mo.name;
+        (getState().versions || []).forEach(v => {
+          if (v && Array.isArray(v.mods)) v.mods = v.mods.map(n => (n === oldName ? newName : n));
+        });
+      }
       mo.name = newName;
     }
     if (opts.tag != null) mo.tag = (opts.tag || '').trim() || '待启动';
@@ -376,7 +385,20 @@ export function createMutations(ctx) {
     // 优先级：传 null/'' 表示清除（回到「未设置」），传非法值按清除处理
     if (opts.pri != null || 'pri' in opts) mo.pri = normalizePriority(opts.pri);
     // 排期状态（人工）：true = 待排期。待排期需求不在总览展示排期，也不计入并行/逾期统计
-    if (opts.unscheduled != null) mo.unscheduled = !!opts.unscheduled;
+    if (opts.unscheduled != null) {
+      const wasUnscheduled = !!mo.unscheduled;
+      mo.unscheduled = !!opts.unscheduled;
+      // 待排期 → 已排期：日期终于可信，此时才把版本上线日钉上（见 applyVersionMods 的跳过逻辑）
+      if (wasUnscheduled && !mo.unscheduled) {
+        const v = (getState().versions || []).find(x => x && (x.mods || []).includes(mo.name));
+        if (v) {
+          // 先钉再 collect：补建的上线里程碑要先进索引，collectAffected 才认得出它的后置
+          const msId = pinModToDate(mo, v.date);
+          ctx.collect();
+          ctx.recomputeAffected(ctx.collectAffected(msId));
+        }
+      }
+    }
     ctx.collect();  // 重建索引（写回任务的 mod 引用）
     ctx.save();
     return mo;
@@ -404,12 +426,238 @@ export function createMutations(ctx) {
     const mo = mods[idx];
     const goneIds = new Set(mo.bars.map(b => b.id));
     mods.splice(idx, 1);
+    // 版本成员用需求名引用 → 需求被删时同步清理，避免版本卡里挂着一个不存在的成员
+    (getState().versions || []).forEach(v => {
+      if (v && Array.isArray(v.mods)) v.mods = v.mods.filter(n => n !== name);
+    });
     // 清理所有剩余任务对被删成员/被删需求任务的依赖
     mods.forEach(m => m.bars.forEach(b => {
       if (b.dep) b.dep = b.dep.filter(d => !goneIds.has(d.id));
     }));
     ctx.collect();
     ctx.save();
+  }
+
+  // ============ 版本（迭代）管理 ============
+  // 语义（与用户确认）：迭代 = 版本，给一组需求一个「权威上线日」。
+  //   · 加入版本 → 把该需求的「上线」里程碑钉到版本日（**写数据**）：
+  //     于是图上的红色菱形、任务抽屉、总览「里程碑一览」、导出/同步、撤销栈全部自动一致；
+  //     若改成"渲染/排期时临时覆盖"，就要同步改 5 个读 m 的地方，迟早显示成两个日期。
+  //   · 改版本日 → 批量回写；移出/删版本 → 解锁回「跟着任务链自动算」（不还原旧日期）。
+  //   · 排期引擎保持正向（不做反向排期），"赶不上"只在渲染层预警（见 core/versions.js）。
+  // versions 是 state 的顶层数组：新增/修改时别忘了同步各白名单出口（persistence / plan-sync / history）。
+
+  const versions = () => {
+    if (!Array.isArray(getState().versions)) setState({ versions: [] });
+    return getState().versions;
+  };
+  const findVersionRaw = id => versions().find(v => v && v.id === id) || null;
+  const modByName = name => (getState().modules || []).find(m => m.name === name) || null;
+
+  // 该需求的「上线」里程碑（多个取最后一个，与 addModule 的创建顺序一致）。
+  //
+  // ⚠️ 不能只认 p === 'go'：默认数据与历史数据里的上线里程碑是 `{ m:'2026-09-09', label:'9/9 上线' }`，
+  // **没有 p 字段**（阶段色靠 `PCOL[b.p] || PCOL.go` 兜底，一直没人注意）。
+  // 只按 p 找会"找不到 → 补建一个"，于是每加入一次版本就凭空多出一个「上线」菱形，且旧的那个还挂在自动模式上。
+  // 故按「p === 'go' 或 label 里含上线」识别：这条口径同时覆盖默认数据里的"11/13 整体上线"。
+  function isGoMs(b) {
+    if (!b || !b.m) return false;
+    if (b.p === 'go') return true;
+    return /上线/.test(String(b.label || ''));
+  }
+
+  function findGoMs(mo) {
+    let ms = null;
+    (mo.bars || []).forEach(b => { if (isGoMs(b)) ms = b; });
+    return ms;
+  }
+
+  // 把需求的上线日钉到 dateStr，返回被钉里程碑的 id（供级联重算用）。
+  // 没有「上线」里程碑（自定义阶段时没建 / 被删过）→ 补建一个，依赖挂到该需求最后一个普通任务上，
+  // 这样将来解锁后还能由引擎算出合理日期，而不是留一个没有依赖的孤儿里程碑。
+  function pinModToDate(mo, dateStr) {
+    let ms = findGoMs(mo);
+    if (!ms) {
+      const last = [...(mo.bars || [])].reverse().find(b => !b.m);
+      ms = {
+        id: genTaskId(mo.name, 'go'), p: 'go', label: '上线',
+        m: fmt(F(dateStr)), dep: last ? [{ id: last.id, lag: 0 }] : [],
+        manual: true, ignore: false
+      };
+      mo.bars.push(ms);
+    }
+    ms.m = fmt(F(dateStr));
+    ms.manual = true;   // 钉住：一键自动计划不会再改动它（否则版本日会被自动重排冲掉）
+    return ms.id;
+  }
+
+  // 解锁：回到「跟着任务链自动算」。刻意不还原加入版本前的旧日期（不存快照）——
+  // 用户要的是"不再受版本约束"，回到自动语义即可，恢复一个历史日期只会更费解。
+  function unpinMod(mo) {
+    const ms = findGoMs(mo);
+    if (!ms || !ms.manual) return null;
+    ms.manual = false;
+    // ⚠️ 默认数据/老数据的上线里程碑**没有依赖**，而引擎对"自动但无依赖"的里程碑是保持现状，
+    // 于是解锁后日期会永远卡在版本日 —— 看起来像解锁失败。补一条到「最后一个普通任务」的依赖，
+    // 才是真正意义上的"跟着任务自动算"。
+    if (!(ms.dep || []).length) {
+      const last = [...(mo.bars || [])].reverse().find(b => !b.m);
+      if (last && last.id) ms.dep = [{ id: last.id, lag: 0 }];
+    }
+    return ms.id;
+  }
+
+  // 收敛版本成员名单（新增/移除/换期后统一走这里）：
+  //   进入名单 → 钉上线日；离开名单 → 解锁；名单外的一概不动
+  // 返回 { touched: [被钉的里程碑 id], rejected: [{name, reason}] }
+  function applyVersionMods(v, names) {
+    const owner = versionOfMap(versions());
+    const next = [];
+    const rejected = [];
+    const seen = new Set();
+    (names || []).forEach(name => {
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      const mo = modByName(name);
+      if (!mo) { rejected.push({ name, reason: '需求不存在' }); return; }
+      if (mo.archived) { rejected.push({ name, reason: '已归档需求不能加入版本' }); return; }
+      const ow = owner[name];
+      if (ow && ow.id !== v.id) { rejected.push({ name, reason: `已在版本「${ow.name}」中` }); return; }
+      next.push(name);
+    });
+
+    // 移出名单的：解锁上线日
+    const touched = [];
+    (v.mods || []).forEach(name => {
+      if (next.includes(name)) return;
+      const mo = modByName(name);
+      if (mo) touched.push(unpinMod(mo));
+    });
+    // 留在名单里的：钉到当前版本日（改期后也靠这一步回写）
+    next.forEach(name => {
+      const mo = modByName(name);
+      if (!mo) return;
+      // 待排期需求的日期本来就不可信 → 先只登记成员，不钉日；
+      // 等它被改成「已排期」时再由 updateModule 补钉（见那里注释）
+      if (mo.unscheduled) return;
+      touched.push(pinModToDate(mo, v.date));
+    });
+    v.mods = next;
+    return { touched: touched.filter(Boolean), rejected };
+  }
+
+  // 被钉过上线日的里程碑，其时间变化会波及依赖它的任务（回归验证这类收口任务）→ 统一级联一次
+  function cascadeFrom(ids) {
+    if (!ids || !ids.length) return;
+    ctx.collect();
+    const affected = new Set();
+    ids.forEach(id => ctx.collectAffected(id).forEach(x => affected.add(x)));
+    ctx.recomputeAffected(affected);
+  }
+
+  // 新建版本：名称唯一、上线日必填；opts.mods 可一次性带上成员（弹窗里勾选）
+  function createVersion(opts) {
+    assertEditable(true);  // 只读模式下新增版本抛错
+    const name = ((opts && opts.name) || '').trim();
+    if (!name) throw new Error('版本名称不能为空');
+    if (!opts.date) throw new Error('请选择上线日');
+    if (versions().some(v => v.name === name)) throw new Error('版本已存在：' + name);
+    const v = {
+      id: newVersionId(), name, date: fmt(F(opts.date)),
+      shipped: false, shippedAt: null, mods: []
+    };
+    versions().push(v);
+    const r = applyVersionMods(v, opts.mods || []);
+    cascadeFrom(r.touched);
+    ctx.save();
+    return { version: v, rejected: r.rejected };
+  }
+
+  // 修改版本：改名 / 改期 / 改成员名单（三者共用同一个弹窗）
+  function updateVersion(id, patch) {
+    if (!assertEditable()) return null;
+    const v = findVersionRaw(id);
+    if (!v) return null;
+    const p = patch || {};
+    if (p.name != null) {
+      const nm = String(p.name).trim();
+      if (!nm) throw new Error('版本名称不能为空');
+      if (versions().some(x => x.id !== v.id && x.name === nm)) throw new Error('版本已存在：' + nm);
+      v.name = nm;
+    }
+    const dateChanged = p.date != null && fmt(F(p.date)) !== v.date;
+    if (dateChanged) v.date = fmt(F(p.date));
+    // 实际上线日：只对"已标记上线"的版本有意义（编辑弹窗里那一行也是按这个前提显示的）
+    if (p.shippedAt != null && v.shipped && p.shippedAt) v.shippedAt = fmt(F(p.shippedAt));
+    let rejected = [];
+    let touched = [];
+    if ('mods' in p) {
+      const r = applyVersionMods(v, p.mods);
+      touched = r.touched;
+      rejected = r.rejected;
+    } else if (dateChanged) {
+      // 只改期：把新上线日回写给所有成员（待排期的成员跳过，与 applyVersionMods 同口径）
+      (v.mods || []).forEach(name => {
+        const mo = modByName(name);
+        if (mo && !mo.unscheduled) touched.push(pinModToDate(mo, v.date));
+      });
+      touched = touched.filter(Boolean);
+    }
+    cascadeFrom(touched);
+    ctx.save();
+    return { version: v, rejected };
+  }
+
+  // 标记已上线 / 取消标记。实际发版日期可传（缺省今天）——「计划 vs 实际」是版本管理最有用的一个数
+  function shipVersion(id, shipped, shippedAt) {
+    if (!assertEditable()) return null;
+    const v = findVersionRaw(id);
+    if (!v) return null;
+    v.shipped = !!shipped;
+    v.shippedAt = shipped ? fmt(F(shippedAt || new Date())) : null;
+    ctx.save();
+    return v;
+  }
+
+  // 删除版本：成员全部解锁（上线日回到自动跟随任务链），版本本身移除
+  function deleteVersion(id) {
+    if (!assertEditable()) return;
+    const list = versions();
+    const idx = list.findIndex(v => v && v.id === id);
+    if (idx < 0) return;
+    const v = list[idx];
+    const touched = [];
+    (v.mods || []).forEach(name => {
+      const mo = modByName(name);
+      if (mo) touched.push(unpinMod(mo));
+    });
+    list.splice(idx, 1);
+    cascadeFrom(touched.filter(Boolean));
+    ctx.save();
+  }
+
+  // 把某条需求从版本移出（等价于"成员名单减一项"）
+  function removeModFromVersion(id, name) {
+    const v = findVersionRaw(id);
+    if (!v) return null;
+    return updateVersion(id, { mods: (v.mods || []).filter(n => n !== name) });
+  }
+
+  // 一键归档本版本的全部需求：刻意**不**在"标记上线"时自动执行 ——
+  // 上线后用户往往还要看几天进度，自动收口会让人找不到需求。返回实际归档的数量。
+  function archiveVersionMods(id) {
+    if (!assertEditable()) return 0;
+    const v = findVersionRaw(id);
+    if (!v) return 0;
+    const at = new Date().toISOString();
+    let n = 0;
+    (v.mods || []).forEach(name => {
+      const mo = modByName(name);
+      if (mo && !mo.archived) { mo.archived = true; mo.archivedAt = at; n++; }
+    });
+    ctx.collect();
+    ctx.save();
+    return n;
   }
 
   // 拖拽调整工作量（持续时间）：edge='l' 拖左边缘改开始日期，edge='r' 拖右边缘改结束日期；锁定手动并级联重算后置
@@ -491,6 +739,8 @@ export function createMutations(ctx) {
     assertEditable, nameOf,
     saveTask, moveMilestone, setMilestoneDate, changeTaskType,
     renameTask, deleteTask, addTask, addModule, updateModule, archiveModule, deleteModule, moveModule, moveBar, resizeTask,
+    // 版本（迭代）
+    createVersion, updateVersion, shipVersion, deleteVersion, removeModFromVersion, archiveVersionMods,
     updateResource, addResource, deleteResource
   };
 }

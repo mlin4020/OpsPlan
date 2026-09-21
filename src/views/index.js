@@ -20,6 +20,7 @@ import { renderReportView } from './report-view.js';
 import { renderArchiveView } from './archive-view.js';
 import { renderResView } from './res-view.js';
 import { renderWorkView } from './work-view.js';
+import { renderVersionView } from './version-view.js';
 
 // 缩放倍率 -> 日宽像素（源 ZOOM_DAYW）
 const ZOOM_DAYW = { day: 13, week: 15, month: 32 };
@@ -165,11 +166,12 @@ export function renderAll(ctx) {
     if (ctx.gsc) { ctx.gsc.scrollLeft = keepScroll; ctx.gsc.scrollTop = keepTop; }
     return;
   }
-  // 归档需求 / 资源工作视图：独立页面，与总览同为"整页纵向文档"形态，
+  // 归档需求 / 资源工作视图 / 版本：独立页面，与总览同为"整页纵向文档"形态，
   // 故共用 report-mode（宽度 100% + 页面留白）与纵向滚动位置保持。
   // 归档页的重绘同样要保持纵向位置（展开卡片后不能弹回顶部），与总览一致。
-  if (view === 'arch' || view === 'work') {
-    gantt.innerHTML = view === 'arch' ? renderArchiveView(gantt, full) : renderWorkView(gantt, full);
+  if (view === 'arch' || view === 'work' || view === 'version') {
+    gantt.innerHTML = view === 'arch' ? renderArchiveView(gantt, full)
+      : (view === 'work' ? renderWorkView(gantt, full) : renderVersionView(gantt, full));
     gantt.style.width = '100%';
     gantt.classList.add('report-mode');
     if (ctx.gsc) { ctx.gsc.scrollLeft = keepScroll; ctx.gsc.scrollTop = keepTop; }
@@ -198,4 +200,5 @@ export { renderReportView, toggleReportExpanded, isReportExpanded } from './repo
 export { renderArchiveView } from './archive-view.js';
 export { renderResView } from './res-view.js';
 export { renderWorkView } from './work-view.js';
+export { renderVersionView, toggleVersionExpanded, isVersionExpanded } from './version-view.js';
 export { PAD };

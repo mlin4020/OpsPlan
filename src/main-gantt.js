@@ -27,9 +27,9 @@ import { createPlanSync } from './services/plan-sync.js';
 // 解析项目参数
 const params = new URLSearchParams(location.search);
 const projectId = params.get('project');
-// 白名单里的键必须与 shell.js 的 data-view 一致（含 work / arch）；
+// 白名单里的键必须与 shell.js 的 data-view 一致（含 work / arch / version）；
 // 不在白名单里的值静默回退默认视图 —— 拼错的 ?view=xxx 会表现为"链接打不开"
-const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work'].includes(params.get('view')) ? params.get('view') : 'report';
+const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work', 'version'].includes(params.get('view')) ? params.get('view') : 'report';
 // ?me=某人：资源工作视图的"看自己"深链（如 ?view=work&me=张三）。
 // 没有账号与资源人名的映射关系（Supabase 用户 ≠ 资源库人名），故用 URL 参数代替"我是谁"，
 // 员工把自己的链接存成书签即可一步到位，无需在系统里维护身份映射。

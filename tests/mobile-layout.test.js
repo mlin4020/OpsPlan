@@ -175,8 +175,13 @@ describe('移动端：抽屉可关闭', () => {
     expect(css).toMatch(/body\.arch-view \[data-report-hide\]:not\(\.stats\)\{display:none\}/);
     expect(css).toMatch(/body\.arch-view \.msheet-item\[data-zoom-only\]\{display:none\}/);
     // 归档页没有时间轴，缩放对它无意义（且不该劫持 Ctrl+滚轮）
-    // —— 资源工作视图（work）同属非时间轴视图，一并排除，故这条断言的钉死文本随之扩展
-    expect(toolbar).toMatch(/return v !== 'report' && v !== 'arch' && v !== 'work';/);
+    // —— 资源工作视图（work）/ 版本页（version）同属非时间轴视图，一并排除，
+    //    故这条断言的钉死文本随之扩展
+    expect(toolbar).toMatch(/return v !== 'report' && v !== 'arch' && v !== 'work' && v !== 'version';/);
+    // 版本（迭代）页按同一套「整页文档」口径收敛工具栏，且不提供缩放项
+    expect(toolbar).toMatch(/classList\.toggle\('version-view', v === 'version'\)/);
+    expect(css).toMatch(/body\.version-view \[data-report-hide\]\{display:none\}/);
+    expect(css).toMatch(/body\.version-view \.msheet-item\[data-zoom-only\]\{display:none\}/);
     // 手机顶栏的 ＋任务 / 排期问题 属于排期操作，必须跟着一起收敛
     expect(html).toMatch(/class="hero-acts" data-report-hide/);
   });

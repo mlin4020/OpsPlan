@@ -482,6 +482,7 @@ body.arch-view [data-report-hide]:not(.stats){display:none}
 .rr-list{display:flex;flex-direction:column;gap:6px}
 .rr-item{display:flex;align-items:flex-start;gap:8px;font-size:11px;padding:8px 10px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a}
 .rr-type{flex:none;font-size:9px;font-weight:800;color:#92400e;background:#fde68a;border-radius:4px;padding:1px 7px}
+.rr-type.ver{color:#9a3412;background:#fdba74}
 .rr-desc{color:#78350f;line-height:1.5}
 .rr-empty{font-size:12px;color:#059669;padding:8px 2px;font-weight:600}
 .rr-tip{font-size:10px;color:#92400e;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;margin-top:12px}
@@ -819,6 +820,83 @@ body.work-view .msheet-item[data-zoom-only]{display:none}
   /* ---------- 归档需求页面：窄屏把「取消归档」放大到触摸友好尺寸 ----------
      卡片网格在手机上是单列（.rmod-grid 由断点控制），与总览一致，无需另做版式。 */
   .rmod-unarch{width:32px;height:32px;font-size:15px}
+
+  /* ---------- 版本（迭代）页面：窄屏把需求名单独放一行 ----------
+     与甘特需求行同一处理（名称必须看得全），其余信息降到第二行；
+     「×」放大到触摸友好尺寸。
+     注意：手机端规则必须并进本断点块，不要在文件末尾另起一个 @media ——
+     手机端样式的"唯一收口处"是既有的约定（也有测试按"最后一个断点块"定位它）。 */
+  .ver-hd{gap:7px;padding:11px 12px}
+  .ver-name{max-width:100%}
+  .ver-hint{min-width:0}
+  .ver-body{padding:2px 12px 12px}
+  .ver-mod{gap:6px 8px;padding:10px 2px}
+  .ver-mod-name{flex:1 1 100%;white-space:normal;overflow-wrap:anywhere;line-height:1.3;font-size:13px}
+  .ver-mod-range{width:auto;flex:1 1 auto;text-align:left}
+  .ver-mod-pct{width:auto;flex:none}
+  .ver-mod-x{padding:0 8px;font-size:19px}
+  .ver-foot{flex-wrap:wrap}
+  .ver-picker{max-height:190px}
+  .ver-pick-item{padding:9px 8px}
 }
+
+/* ============================================================
+   版本（迭代）页面 —— .ver-*
+   版式沿用「整页文档」那套：外层 .report-wrap / .report-sec / .report-head 与归档页共用，
+   版本卡则沿用总览需求卡的视觉语言（白底 / 12px 圆角 / 1px 描边 / hover 微抬，不做立体投影）。
+   类名统一 ver- 前缀：本项目有过 .seg 撞名互相污染的事故，新页面的类名一律带自己的前缀。
+   ============================================================ */
+/* 整页文档视图：收敛工具栏（同 report/work），hero 统计也藏 —— 本页自带版本汇总 */
+body.version-view [data-report-hide]{display:none}
+/* 非时间轴视图：不提供缩放项（与 report/arch/work 一致） */
+body.version-view .msheet-item[data-zoom-only]{display:none}
+/* 只读：所有会改数据的按钮一律隐藏（避免"点了没反应"的错觉） */
+body.readonly-mode .ver-act{display:none}
+.ver-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.ver-hint{flex:1;min-width:220px;font-size:11px;color:#94a3b8;line-height:1.6}
+.ver-list{display:flex;flex-direction:column;gap:10px}
+.ver-card{background:#fff;border:1px solid #e8edf5;border-radius:12px;box-shadow:0 1px 2px #0f172a0a;transition:border-color .2s,box-shadow .2s}
+.ver-card:hover{border-color:var(--accent-line);box-shadow:0 6px 18px -8px var(--accent-ring)}
+.ver-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;min-height:52px}
+.ver-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:800;color:#0f1729}
+.ver-date{font-size:11.5px;font-weight:700;color:#0f1729;font-variant-numeric:tabular-nums}
+.ver-actual{font-size:11px;font-weight:700;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.ver-count,.ver-range{font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
+.ver-pct{font-size:11.5px;font-weight:800;color:#0f1729;font-variant-numeric:tabular-nums}
+.ver-late{font-size:10.5px;font-weight:800;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:1px 7px;white-space:nowrap}
+.ver-spacer{flex:1}
+.ver-arr{flex:none;border:none;background:none;padding:4px 6px;font-size:11px;color:#94a3b8;cursor:pointer;font-family:inherit}
+.ver-arr:hover{color:var(--accent)}
+.ver-body{border-top:1px dashed #eef1f6;padding:4px 16px 12px}
+.ver-mod{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 6px;border-bottom:1px dashed #eef1f6}
+.ver-mod:last-of-type{border-bottom:none}
+.ver-mod-name{flex:1 1 160px;min-width:0;display:flex;align-items:center;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:700;color:#0f1729}
+.ver-mod-range{flex:none;width:96px;text-align:right;font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
+.ver-mod-pct{flex:none;width:38px;text-align:right;font-size:11px;font-weight:800;color:#0f1729;font-variant-numeric:tabular-nums}
+.ver-mod-flag{flex:none;font-size:10px;font-weight:700;border-radius:6px;padding:1px 7px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ver-mod-flag.ok{color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4}
+.ver-mod-flag.late{color:#b91c1c;background:#fef2f2;border:1px solid #fecaca}
+.ver-mod-flag.muted{color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0}
+.ver-mod-x{flex:none;border:none;background:none;padding:0 4px;font-size:15px;line-height:1;color:#cbd5e1;cursor:pointer;font-family:inherit}
+.ver-mod-x:hover{color:#dc2626}
+.ver-mod-empty{padding:14px 6px;font-size:12px;color:#94a3b8}
+.ver-foot{display:flex;align-items:center;gap:8px;padding:12px 6px 0}
+.ver-empty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:44px 16px;background:#fff;border:1px dashed #dbe3ee;border-radius:12px;text-align:center}
+.ver-empty b{font-size:14px;color:#64748b}
+.ver-empty span{font-size:12px;color:#94a3b8;line-height:1.6}
+/* 需求上的版本徽标（总览卡 / 甘特需求行共用；浅底+描边，与实心状态标签区分开） */
+.ver-badge{flex:none;font-size:9.5px;font-weight:800;color:var(--accent-ink);background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:6px;padding:1px 6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* 版本弹窗里的需求多选 */
+.ver-pick-row .ver-picker{flex:1;min-width:0}
+.ver-picker{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:6px;background:#fafbfd;border:1px solid #e4eaf2;border-radius:10px}
+.ver-pick-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;font-size:12.5px;color:#0f1729;cursor:pointer}
+.ver-pick-item:hover{background:#f1f5f9}
+.ver-pick-item input{flex:none;accent-color:var(--accent)}
+.ver-pick-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ver-pick-hint{flex:none;font-size:10px;color:#94a3b8}
+.ver-pick-item.off{opacity:.55;cursor:not-allowed}
+.ver-pick-empty{padding:10px;font-size:12px;color:#94a3b8}
+.ver-modal-tip{margin:8px 0 0;font-size:11px;color:#94a3b8;line-height:1.6}
+
 
 

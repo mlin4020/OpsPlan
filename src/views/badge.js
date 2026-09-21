@@ -13,3 +13,10 @@ import { PRIORITIES } from '../core/default-data.js';
 export const priorityBadge = p => (PRIORITIES.includes(p)
   ? `<span class="pri pri-${p.toLowerCase()}" title="优先级 ${p}">${p}</span>`
   : '');
+
+// 版本徽标：这条需求属于哪个版本（迭代）。
+// 取的数据是 core/versions.js 的 versionOfMap 反查结果 —— 需求侧刻意不存版本字段，
+// 避免"需求改名后版本名单对不上"这类静默不一致。
+export const versionBadge = v => (v && v.name
+  ? `<span class="ver-badge" title="所属版本 ${v.name}${v.date ? ` · 计划 ${v.date} 上线` : ''}">${v.name}</span>`
+  : '');

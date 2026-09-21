@@ -10,7 +10,8 @@ import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
 import { moduleTag, computeModulePer, milestoneName } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
-import { priorityBadge } from './badge.js';
+import { versionOfMod } from '../core/versions.js';
+import { priorityBadge, versionBadge } from './badge.js';
 
 // 计划模式图标：手动=锁定，自动=循环重算
 const MODE_ICO = {
@@ -187,7 +188,7 @@ export function renderModView(container, ctx, conflictSet) {
     // 桌面端两者同一行（与原版式一致），手机端名称独占一行完整显示，次要信息降到第二行，
     // 避免左列只有 108px 时需求名被截成「标保督导 ·」这样看不出所以然来。
     html += `<div class="row mod-row" data-mod="${mo.name}">
-      <div class="mname">${mc ? `<span class="mod-dot" style="background:${mc}" title="需求标识色（与任务条左侧色条一致）"></span>` : ''}<span class="mname-main"><span class="mname-txt" title="${mo.name}">${mo.name}</span><span class="mname-sub">${priorityBadge(mo.pri)}<span class="tag" style="background:${autoTagc}">${autoTag}</span><span class="range">${rngTxt}</span><span class="per">${autoPer}</span></span></span><span class="arr" style="transform:${isCol ? 'rotate(-90deg)' : 'rotate(0)'}">▼</span>
+      <div class="mname">${mc ? `<span class="mod-dot" style="background:${mc}" title="需求标识色（与任务条左侧色条一致）"></span>` : ''}<span class="mname-main"><span class="mname-txt" title="${mo.name}">${mo.name}</span><span class="mname-sub">${priorityBadge(mo.pri)}${versionBadge(versionOfMod(state, mo.name))}<span class="tag" style="background:${autoTagc}">${autoTag}</span><span class="range">${rngTxt}</span><span class="per">${autoPer}</span></span></span><span class="arr" style="transform:${isCol ? 'rotate(-90deg)' : 'rotate(0)'}">▼</span>
       </div>
       <span class="mod-edit-btn" title="编辑需求">⚙</span>
       <div class="track">${bands(ctx)}`;

@@ -28,6 +28,8 @@ const MI = {
   // res 是"按时间轴看人"，work 是"按清单看活"
   work: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.2 4.4 7.8l2.6-2.9"/><path d="M2.8 12.4 4.4 14l2.6-2.9"/><path d="M2.8 18.6 4.4 20.2l2.6-2.9"/><path d="M11.2 6.6h10"/><path d="M11.2 13h10"/><path d="M11.2 19.4h10"/></svg>',
   arch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.2" rx="1.6"/><path d="M4.6 8.2v10.2a1.6 1.6 0 0 0 1.6 1.6h11.6a1.6 1.6 0 0 0 1.6-1.6V8.2"/><path d="M9.6 12.6h4.8"/></svg>',
+  // 版本（迭代）：吊牌图标 —— 与 arch 的"箱子"刻意区分（一个是收口留档，一个是待发车）
+  version: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 12.6 12.6 3.4h5.4a2.6 2.6 0 0 1 2.6 2.6v5.4l-9.2 9.2a1.7 1.7 0 0 1-2.4 0l-5.6-5.6a1.7 1.7 0 0 1 0-2.4z"/><circle cx="15.4" cy="8.6" r="1.35"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5.2" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.8" cy="12" r="1.7"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
   warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.7 2.8 19.3h18.4z"/><path d="M12 9.7v4.1"/><path d="M12 16.5h.01"/></svg>'
@@ -45,7 +47,8 @@ function mobileNavHTML(withMore) {
   <button class="mnav-item" data-view="mod">${MI.mod}<span>甘特图</span></button>
   <button class="mnav-item" data-view="res">${MI.res}<span>规划器</span></button>
   <button class="mnav-item" data-view="work">${MI.work}<span>工作视图</span></button>
-  <button class="mnav-item" data-view="arch">${MI.arch}<span>归档</span><span class="badge mnav-badge badge-neutral" id="archNavCountM" hidden>0</span></button>${more}
+  <button class="mnav-item" data-view="arch">${MI.arch}<span>归档</span><span class="badge mnav-badge badge-neutral" id="archNavCountM" hidden>0</span></button>
+  <button class="mnav-item" data-view="version">${MI.version}<span>版本</span></button>${more}
 </nav>`;
 }
 
@@ -99,6 +102,7 @@ export function buildViewerShellHTML() {
     <button class="btn" data-view="res">工作组规划器</button>
     <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
     <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
+    <button class="btn" data-view="version" title="版本（迭代）：给一组需求一个统一上线日，一起上线">版本</button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>
     <button class="btn on" data-z="day">日</button>
@@ -147,6 +151,7 @@ export function buildShellHTML() {
     <button class="btn" data-view="res">工作组规划器</button>
     <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
     <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
+    <button class="btn" data-view="version" title="版本（迭代）：给一组需求一个统一上线日，一起上线">版本</button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>
     <button class="btn on" data-z="day">日</button>
@@ -369,6 +374,26 @@ ${mobileSheetHTML()}
     <button class="btn danger" id="btnDelMod" style="display:none" title="删除此需求及其所有任务">删除</button>
     <span class="spacer"></span>
     <button class="btn ghost" id="btnNewModCancel">取消</button>
+  </div>
+</div>
+
+<!-- 版本（迭代）：新建 / 编辑（改名 · 改上线日 · 勾选成员）三合一。
+     刻意不拆成三个弹窗：「新建一个版本」和「往版本里加需求」本质是同一张表单，
+     拆开会让"加需求"多走一步（先加空版本再勾人）。 -->
+<div class="modal-mask" id="verMask"></div>
+<div class="modal" id="verModal" role="dialog" aria-modal="true" aria-label="版本">
+  <h3 id="verModalTitle">新建版本</h3>
+  <div class="f-row"><label style="width:64px">版本名称</label><input type="text" id="inpVerName" placeholder="如：V2.3 / 2026-10 版本" maxlength="24"></div>
+  <div class="f-row"><label style="width:64px">上线日</label><input type="date" id="inpVerDate"></div>
+  <div class="f-row" id="verActualRow" hidden><label style="width:64px">实际上线</label><input type="date" id="inpVerActual"></div>
+  <div class="f-row ver-pick-row"><label style="width:64px">包含需求</label>
+    <div class="ver-picker" id="verPicker"></div>
+  </div>
+  <p class="ver-modal-tip">勾选的需求，图上那条「上线」日期会自动改为本版本上线日（手动锁定，自动计划不会改它）。已在别的版本里的需求不可选，需先从那个版本移出。</p>
+  <div class="modal-foot">
+    <button class="btn primary" id="btnSaveVer">保存</button>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="btnCancelVer">取消</button>
   </div>
 </div>
 

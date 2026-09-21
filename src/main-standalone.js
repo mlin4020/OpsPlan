@@ -20,6 +20,7 @@ import { defaultWorkFilter } from './core/work-filter.js';
 import { createScheduler } from './scheduler/index.js';
 import { buildViewerShellHTML } from './components/shell.js';
 import { bindWorkFilter } from './components/work-filter.js';
+import { bindVersionPage } from './components/version-page.js';
 import { renderAll } from './views/index.js';
 import { restoreTheme } from './utils/theme.js';
 
@@ -49,8 +50,8 @@ function boot() {
   // 注意：必须先读取注入数据（#plan-data script），
   // 再重建 body——innerHTML 替换会销毁原有 script 元素。
   const params = new URLSearchParams(location.search);
-  // 白名单与主壳保持一致（含 work / arch），未知值回退默认视图
-  const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work'].includes(params.get('view')) ? params.get('view') : 'mod';
+  // 白名单与主壳保持一致（含 work / arch / version），未知值回退默认视图
+  const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work', 'version'].includes(params.get('view')) ? params.get('view') : 'mod';
   const injected = readInjectedPlan();
 
   // 只读查看器同样跟随已选配色（file:// 下 localStorage 不可用时静默降级为默认色）
@@ -63,6 +64,8 @@ function boot() {
     planStore.set({
       modules: injected.modules,
       resources: Array.isArray(injected.resources) && injected.resources.length ? injected.resources : [],
+      // 版本（迭代）：老导出件里没有该字段 → 空列表（版本页显示空态，不影响其它视图）
+      versions: Array.isArray(injected.versions) ? injected.versions : [],
       start: injected.start ? parseDate(injected.start) : planStore.state.start,
       end: injected.end ? parseDate(injected.end) : planStore.state.end
     });
@@ -73,6 +76,10 @@ function boot() {
   }
   // 只读查看器：无用户、只读（防御任何修改入口）
   userStore.set({ user: null, readonly: true });
+  // body 级只读标记：主壳由 utils/readonly.js 的 enterReadonly 打上，查看器没有组件层，
+  // 这里显式补一个 —— 版本页的「新建/编辑/标记上线」等按钮靠 `body.readonly-mode .ver-act` 隐藏，
+  // 不打标就会在导出件里露出一排点了没反应的按钮。
+  document.body.classList.add('readonly-mode');
 
   // 调度引擎（不注入 sync，仅用于渲染统计/问题检测）
   const workday = createWorkday({ holidays: defaultHolidays() });
@@ -115,6 +122,17 @@ function boot() {
   }
   // 筛选条事件（共用组件层实现）：查看器没有组件层，这里单独绑一次，否则筛选条点了没反应
   bindWorkFilter({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render });
+  // 版本页同理：导出件里要能展开/收起版本成员（领导看的就是"这版有哪几个需求"）。
+  // 其余入口（新建/编辑/标记上线/删除）在只读下自行失效，无需另写一套只读版。
+  bindVersionPage({
+    doc: document,
+    getEl: id => document.getElementById(id),
+    gantt: baseCtx.gantt,
+    planStore, sched, userStore,
+    toast: () => {},
+    today: () => new Date(),
+    render
+  });
 
   // ---- 工具栏：视图切换 + 缩放（日/周/月 + 滑块） ----
   const syncViewBtns = () => document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === viewState.view));
@@ -126,6 +144,7 @@ function boot() {
     document.body.classList.toggle('report-view', v === 'report');
     document.body.classList.toggle('work-view', v === 'work');
     document.body.classList.toggle('arch-view', v === 'arch');
+    document.body.classList.toggle('version-view', v === 'version');
   };
   const applyZoom = dw => {
     viewState.dayW = Math.max(2, Math.min(40, Math.round(dw)));

@@ -7,6 +7,7 @@ import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
 import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, moduleTag } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
+import { sortVersions, versionLateMods } from '../core/versions.js';
 import { priorityBadge } from './badge.js';
 // 需求进度卡片与 modStats/msName 已抽到 mod-card.js，与「归档需求」页共用同一份实现
 import { renderModCard, modStats, msName } from './mod-card.js';
@@ -286,10 +287,21 @@ export function renderReportView(container, ctx) {
   }).join('') : '<div class="report-empty">暂无里程碑</div>';
 
   // ---- 5. 风险与关注点 ----
+  // 版本（迭代）预警排在排期问题之前：前者是「业务后果」（这版上不了），
+  // 后者是「技术原因」（资源撞车/依赖违反）—— 给人看风险先看结论。
+  const verLateHtml = sortVersions(state.versions || [])
+    .filter(v => v && !v.shipped)
+    .map(v => ({ v, list: versionLateMods(v, state) }))
+    .filter(x => x.list.length)
+    .map(x => x.list.slice(0, 3).map(({ mo, late }) =>
+      `<div class="rr-item"><span class="rr-type ver">版本</span><span class="rr-desc">${mo.name} 赶不上「${x.v.name}」（${fmtD(F(x.v.date))} 上线），按当前排期要到 ${fmtD(late.end)}，晚 ${late.days} 天</span></div>`
+    ).join(''))
+    .join('');
   const problems = sched.problems().slice(0, 8);
-  const riskHtml = problems.length ? problems.map(p =>
+  const problemHtml = problems.map(p =>
     `<div class="rr-item"><span class="rr-type ${p.type}">${RISK_TYPE_NAME[p.type] || p.type}</span><span class="rr-desc">${p.desc}</span></div>`
-  ).join('') : '<div class="rr-empty">✓ 当前无排期问题</div>';
+  ).join('');
+  const riskHtml = (verLateHtml + problemHtml) || '<div class="rr-empty">✓ 当前无排期问题</div>';
   const holTip = (holidays || []).map(h => `${h.n} ${fmtD(h.s)}~${fmtD(h.e)}（${Math.round((h.e - h.s) / 864e5) + 1} 天）`).join('、');
   const resLoad = (state.resources || []).map(r => ({
     name: r.name,
@@ -314,7 +326,7 @@ export function renderReportView(container, ctx) {
         <div class="rml">${mileList}</div>
       </div>
       <div class="report-sec">
-        <div class="report-head">风险与关注点<span>排期问题 · 假期空窗 · 资源负载</span></div>
+        <div class="report-head">风险与关注点<span>版本上线风险 · 排期问题 · 假期空窗 · 资源负载</span></div>
         <div class="rr-list">${riskHtml}</div>
         <div class="rr-tip">${holTip ? `假期空窗：${holTip}` : '无假期'}</div>
         <div class="rr-sub">资源负载 TOP3</div>

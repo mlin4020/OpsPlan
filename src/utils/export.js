@@ -12,7 +12,9 @@
 const TEMPLATE_URL = 'export-template.html';
 
 // 从排期数据组装注入载荷（含项目时间窗口，与 plan-sync buildPayload 结构一致）
-export function buildExportPayload({ name, modules, resources, start, end, savedBy }) {
+// versions：版本（迭代）列表，必须带上 —— 导出的单文件是给领导/业务看的，
+// 「这版要上哪些需求」正是他们最关心的一屏，漏了导出件里就没有版本页
+export function buildExportPayload({ name, modules, resources, versions, start, end, savedBy }) {
   return {
     v: 1,
     name: name || '',
@@ -21,7 +23,8 @@ export function buildExportPayload({ name, modules, resources, start, end, saved
     start: start ? fmtDate(start) : undefined,
     end: end ? fmtDate(end) : undefined,
     modules: modules || [],
-    resources: resources || []
+    resources: resources || [],
+    versions: versions || []
   };
 }
 

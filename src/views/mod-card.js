@@ -13,7 +13,8 @@
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
 import { computeModulePer, computePlanPct, milestoneName, moduleTag } from '../core/mod-tag.js';
-import { priorityBadge } from './badge.js';
+import { versionOfMod } from '../core/versions.js';
+import { priorityBadge, versionBadge } from './badge.js';
 
 // 里程碑名里若自带前导日期（默认数据形如 "9/9 上线"），剥掉它，
 // 避免与外部已单独显示的日期拼成 "9/9 9/9 上线"
@@ -46,6 +47,8 @@ export function renderModCard(mo, ctx, opts = {}) {
   const isExpanded = opts.isExpanded || (() => false);
   const archivedAt = opts.archivedAt || '';
   const actions = opts.actions || '';
+  // 所属版本（迭代）：反查自 state.versions，需求侧不存字段（见 core/versions.js 注释）
+  const ver = versionOfMod(state, mo.name);
 
   // 待排期需求：卡片只保留需求名与状态，不给进度条 / 里程碑 / 人员 / 应达基线
   if (mo.unscheduled) {
@@ -53,7 +56,7 @@ export function renderModCard(mo, ctx, opts = {}) {
       <div class="rmod-top">
         <div class="rmod-idx" style="background:#94a3b8">待排期</div>
         <div class="rmod-head">
-          <span class="rmod-title"><b class="rmod-name">${mo.name}</b>${priorityBadge(mo.pri)}<span class="rmod-range">未排期</span></span>
+          <span class="rmod-title"><b class="rmod-name">${mo.name}</b>${priorityBadge(mo.pri)}${versionBadge(ver)}<span class="rmod-range">未排期</span></span>
         </div>
       </div>
       <div class="rmod-bar"><span class="rtl2-unsched">待排期</span></div>
@@ -116,7 +119,7 @@ export function renderModCard(mo, ctx, opts = {}) {
     <div class="rmod-top">
       <div class="rmod-idx" style="background:${autoTagc}">${autoTag}</div>
       <div class="rmod-head">
-        <span class="rmod-title"><b class="rmod-name">${mo.name}</b>${priorityBadge(mo.pri)}<span class="rmod-range">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : '暂无'}</span>${archivedAt ? `<span class="rmod-at" title="归档时间">${archivedAt}</span>` : ''}</span>
+        <span class="rmod-title"><b class="rmod-name">${mo.name}</b>${priorityBadge(mo.pri)}${versionBadge(ver)}<span class="rmod-range">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : '暂无'}</span>${archivedAt ? `<span class="rmod-at" title="归档时间">${archivedAt}</span>` : ''}</span>
         <span class="rmod-meta" title="完成 ${mp.toFixed(1)}% · ${mDone.toFixed(1)}/${mWork} 人日${stTxt ? ' · ' + stTxt : ''}"><b>${mp.toFixed(1)}%</b><i>${mDone.toFixed(1)}/${mWork} 人日</i>${stTxt ? `<span class="rmod-devi ${st}">${stTxt}</span>` : ''}</span>
         <span class="rmod-phase">${curPhase}</span>
       </div>

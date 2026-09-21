@@ -22,14 +22,15 @@ export function createPersistence(ctx) {
       start: getState().start ? fmt(getState().start) : undefined,
       end: getState().end ? fmt(getState().end) : undefined,
       modules: getState().modules,
-      resources: getState().resources
+      resources: getState().resources,
+      versions: getState().versions
     };
   }
 
   let saveTimer = null;
   function save() {
     // 立即通知订阅者重绘（store 驱动渲染层感知变更）
-    setState({ modules: getState().modules, resources: getState().resources });
+    setState({ modules: getState().modules, resources: getState().resources, versions: getState().versions });
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       // 1) 本地兜底：始终写入 localStorage（离线/未配置 Supabase 也不中断）
@@ -37,7 +38,8 @@ export function createPersistence(ctx) {
         localStorage.setItem(ctx.KEY(), JSON.stringify({
           v: 1, calcVer: ctx.CALC_VER, savedAt: Date.now(),
           modules: getState().modules,
-          resources: getState().resources
+          resources: getState().resources,
+          versions: getState().versions
         }));
       } catch (e) { /* 忽略写入失败 */ }
       // 2) 服务端同步：仅项目模式 + Supabase 可用 + 非只读时推送（由注入的 pushToServer 决定）
@@ -54,6 +56,8 @@ export function createPersistence(ctx) {
       if (data && Array.isArray(data.modules) && data.modules.length && data.calcVer === ctx.CALC_VER) {
         setState({ modules: data.modules });
         if (Array.isArray(data.resources) && data.resources.length) setState({ resources: data.resources });
+        // 老缓存没有 versions 字段（功能上线前的数据）→ 视为空版本列表，不做迁移
+        setState({ versions: Array.isArray(data.versions) ? data.versions : [] });
         // 加载后重置历史，以当前状态为初始快照
         if (ctx.recordInitial) ctx.recordInitial();
         return true;
@@ -72,7 +76,8 @@ export function createPersistence(ctx) {
       })
     }));
     const resources = (getState().resources || []).map(r => ({ ...r }));
-    return JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), modules: clean, resources }, null, 2);
+    const versions = JSON.parse(JSON.stringify(getState().versions || []));
+    return JSON.stringify({ v: 1, exportedAt: new Date().toISOString(), modules: clean, resources, versions }, null, 2);
   }
 
   function importJSON(json) {
@@ -81,6 +86,8 @@ export function createPersistence(ctx) {
     if (!data || !Array.isArray(data.modules) || !data.modules.length) throw new Error('无效的排期数据文件');
     setState({ modules: data.modules });
     if (Array.isArray(data.resources) && data.resources.length) setState({ resources: data.resources });
+    // 版本随数据文件一起导入；文件里没有就清空（导入是"整份替换"语义，不能残留旧版本）
+    setState({ versions: Array.isArray(data.versions) ? data.versions : [] });
     ctx.collect();
     ctx.save();
     // 导入后重置历史，以当前导入状态为初始快照
@@ -91,7 +98,7 @@ export function createPersistence(ctx) {
   function resetToDefault() {
     if (!ctx.assertEditable()) return;
     localStorage.removeItem(ctx.KEY());
-    setState({ modules: ctx.DEFAULT_MODULES, resources: ctx.DEFAULT_RESOURCES });
+    setState({ modules: ctx.DEFAULT_MODULES, resources: ctx.DEFAULT_RESOURCES, versions: [] });
     ctx.collect();
     // 重置后重置历史，以默认数据为初始快照
     if (ctx.recordInitial) ctx.recordInitial();

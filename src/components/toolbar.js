@@ -40,6 +40,7 @@ function syncToolbarForView(deps) {
   body.classList.toggle('report-view', v === 'report');
   body.classList.toggle('work-view', v === 'work');
   body.classList.toggle('arch-view', v === 'arch');
+  body.classList.toggle('version-view', v === 'version');
 }
 
 // 缩放是否对当前视图有意义：
@@ -48,7 +49,7 @@ function syncToolbarForView(deps) {
 // 既不受缩放按钮影响，也不应劫持 Ctrl+滚轮（此时用户多半是想缩放浏览器或滚动页面）。
 function zoomEnabled(deps) {
   const v = deps.viewState.view;
-  return v !== 'report' && v !== 'arch' && v !== 'work';
+  return v !== 'report' && v !== 'arch' && v !== 'work' && v !== 'version';
 }
 
 // 缩放：设置 dayW 并重绘
@@ -129,6 +130,8 @@ async function exportHTML(deps) {
       name: (deps.userStore && deps.userStore.state.project && deps.userStore.state.project.name) || '',
       modules: clean,
       resources: st.resources,
+      // 版本（迭代）也要进导出件：「这版要上哪些需求」正是领导/业务最关心的一屏
+      versions: st.versions || [],
       start: st.start,
       end: st.end,
       savedBy: (deps.userStore && deps.userStore.state.user && (deps.userStore.state.user.email || deps.userStore.state.user.display_name)) || ''

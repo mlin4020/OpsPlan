@@ -4,11 +4,14 @@
 // 撤销/重做时恢复对应快照，最大保留 50 步。
 // ============================================================
 
-// 深拷贝 state（modules / resources / start / end 独立）
+// 深拷贝 state（modules / resources / versions / start / end 独立）
+// ⚠️ versions 必须一起快照：否则撤销后「版本列表」留在新状态、而成员需求的
+//    上线日已回滚 → 版本成员与日期自相矛盾（版本页显示的行和图上菱形对不上）。
 function cloneState(state) {
   return {
     modules: JSON.parse(JSON.stringify(state.modules || [])),
     resources: JSON.parse(JSON.stringify(state.resources || [])),
+    versions: JSON.parse(JSON.stringify(state.versions || [])),
     start: state.start ? new Date(state.start.getTime()) : null,
     end: state.end ? new Date(state.end.getTime()) : null
   };
@@ -18,6 +21,7 @@ function cloneState(state) {
 function restoreState(target, snapshot) {
   target.modules = JSON.parse(JSON.stringify(snapshot.modules || []));
   target.resources = JSON.parse(JSON.stringify(snapshot.resources || []));
+  target.versions = JSON.parse(JSON.stringify(snapshot.versions || []));
   target.start = snapshot.start ? new Date(snapshot.start.getTime()) : null;
   target.end = snapshot.end ? new Date(snapshot.end.getTime()) : null;
 }
@@ -55,6 +59,7 @@ export function createHistory(ctx) {
     ctx.setState({
       modules: ctx.getState().modules,
       resources: ctx.getState().resources,
+      versions: ctx.getState().versions,
       start: ctx.getState().start,
       end: ctx.getState().end
     });

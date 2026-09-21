@@ -144,6 +144,13 @@ export function createScheduler({ planStore, userStore, W, sync }) {
     deleteModule: mutations.deleteModule,
     moveModule: mutations.moveModule,
     moveBar: mutations.moveBar,
+    // 版本（迭代）：创建/改期改名/标记上线/删除/移出成员/一键归档成员
+    createVersion: mutations.createVersion,
+    updateVersion: mutations.updateVersion,
+    shipVersion: mutations.shipVersion,
+    deleteVersion: mutations.deleteVersion,
+    removeModFromVersion: mutations.removeModFromVersion,
+    archiveVersionMods: mutations.archiveVersionMods,
     detectProblems: detect,
     save: (skipHistory) => persistence.save(skipHistory),
     load: persistence.load,
