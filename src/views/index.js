@@ -5,18 +5,21 @@
 //   1) 组装完整 ctx（X/width/fmtD/modRange/dayW/today/holidays/workday 等渲染辅助）
 //   2) 计算冲突集合（依赖/重叠任务的 conflictSet，供 mod/res 视图高亮）
 //   3) 顶部统计（动态人日/并行/逾期）写入
-//   4) 视图分发：report -> renderReportView；mod/res -> renderHeader + renderModView/renderResView
+//   4) 视图分发：report/arch/work -> 整页文档类视图；mod/res -> renderHeader + renderModView/renderResView
 //   5) 设置甘特容器宽度与 report-mode class
 // 纯渲染：不绑定永久事件（tip/折叠/拖拽/详情等由组件层在 innerHTML 写入后委托处理）
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { defaultHolidays } from '../core/default-data.js';
-import { archivedModSet, isOverdueTask, resolveModuleColors } from '../core/mod-auto.js';
+import { archivedModSet } from '../core/mod-tag.js';
+import { isOverdueTask } from '../core/task-status.js';
+import { resolveModuleColors } from '../core/mod-color.js';
 import { renderHeader } from './header.js';
 import { renderModView } from './mod-view.js';
 import { renderReportView } from './report-view.js';
 import { renderArchiveView } from './archive-view.js';
 import { renderResView } from './res-view.js';
+import { renderWorkView } from './work-view.js';
 
 // 缩放倍率 -> 日宽像素（源 ZOOM_DAYW）
 const ZOOM_DAYW = { day: 13, week: 15, month: 32 };
@@ -162,10 +165,11 @@ export function renderAll(ctx) {
     if (ctx.gsc) { ctx.gsc.scrollLeft = keepScroll; ctx.gsc.scrollTop = keepTop; }
     return;
   }
-  // 归档需求：独立页面（不再是两张页面底部的折叠区）。
-  // 与总览同为"整页纵向文档"形态，故共用 report-mode（宽度 100% + 页面留白）。
-  if (view === 'arch') {
-    gantt.innerHTML = renderArchiveView(gantt, full);
+  // 归档需求 / 资源工作视图：独立页面，与总览同为"整页纵向文档"形态，
+  // 故共用 report-mode（宽度 100% + 页面留白）与纵向滚动位置保持。
+  // 归档页的重绘同样要保持纵向位置（展开卡片后不能弹回顶部），与总览一致。
+  if (view === 'arch' || view === 'work') {
+    gantt.innerHTML = view === 'arch' ? renderArchiveView(gantt, full) : renderWorkView(gantt, full);
     gantt.style.width = '100%';
     gantt.classList.add('report-mode');
     if (ctx.gsc) { ctx.gsc.scrollLeft = keepScroll; ctx.gsc.scrollTop = keepTop; }
@@ -193,4 +197,5 @@ export { renderModView, barHtml, bands, msLabel } from './mod-view.js';
 export { renderReportView, toggleReportExpanded, isReportExpanded } from './report-view.js';
 export { renderArchiveView } from './archive-view.js';
 export { renderResView } from './res-view.js';
+export { renderWorkView } from './work-view.js';
 export { PAD };

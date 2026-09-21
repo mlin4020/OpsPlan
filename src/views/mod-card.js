@@ -12,7 +12,8 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, computePlanPct, milestoneName, moduleTag, priorityBadge } from '../core/mod-auto.js';
+import { computeModulePer, computePlanPct, milestoneName, moduleTag } from '../core/mod-tag.js';
+import { priorityBadge } from './badge.js';
 
 // 里程碑名里若自带前导日期（默认数据形如 "9/9 上线"），剥掉它，
 // 避免与外部已单独显示的日期拼成 "9/9 9/9 上线"

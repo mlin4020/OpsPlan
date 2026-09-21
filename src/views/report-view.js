@@ -5,7 +5,9 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, isOverdueTask, moduleTag, priorityBadge } from '../core/mod-auto.js';
+import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, moduleTag } from '../core/mod-tag.js';
+import { isOverdueTask } from '../core/task-status.js';
+import { priorityBadge } from './badge.js';
 // 需求进度卡片与 modStats/msName 已抽到 mod-card.js，与「归档需求」页共用同一份实现
 import { renderModCard, modStats, msName } from './mod-card.js';
 

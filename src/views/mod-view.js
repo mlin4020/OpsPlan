@@ -8,7 +8,9 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { moduleTag, computeModulePer, milestoneName, isOverdueTask, priorityBadge } from '../core/mod-auto.js';
+import { moduleTag, computeModulePer, milestoneName } from '../core/mod-tag.js';
+import { isOverdueTask } from '../core/task-status.js';
+import { priorityBadge } from './badge.js';
 
 // 计划模式图标：手动=锁定，自动=循环重算
 const MODE_ICO = {

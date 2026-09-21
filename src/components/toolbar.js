@@ -27,26 +27,28 @@ function syncViewBtns(deps) {
     .forEach(b => b.classList.toggle('on', b.dataset.view === deps.viewState.view));
 }
 
-// 非时间轴视图（总览 / 归档）都是"整页文档"：不需要缩放/折叠/编辑/排期/数据等操作，
+// 非时间轴视图（总览 / 归档 / 资源工作视图）都是"整页文档"：不需要缩放/折叠/编辑/排期/数据等操作，
 // 统一在 body 上打标记，由 gantt.css 把 shell.js 中带 data-report-hide 的区块整体隐藏 ——
 // 只保留「视图切换」与 serverGroup（返回项目列表 / 从服务器刷新）。
 //   · report-view：总览是纯汇报界面，hero 统计与自己的指标条重复，一并隐藏
+//   · work-view  ：资源工作视图同理（自带指标条），hero 统计一并隐藏
 //   · arch-view  ：归档页同样收敛工具栏，但**保留 hero 统计**（它没有自己的指标条，藏了顶栏就空了）
 function syncToolbarForView(deps) {
   const body = deps.doc && deps.doc.body;
   if (!body) return;
   const v = deps.viewState.view;
   body.classList.toggle('report-view', v === 'report');
+  body.classList.toggle('work-view', v === 'work');
   body.classList.toggle('arch-view', v === 'arch');
 }
 
 // 缩放是否对当前视图有意义：
 // 甘特图 / 工作组规划器的时间轴由 dayW 驱动，缩放有效；
-// 总览（百分比自适应版式）与归档页（卡片网格）都没有时间轴 —— 既不受缩放按钮影响，
-// 也不应劫持 Ctrl+滚轮（此时用户多半是想缩放浏览器或滚动页面）。
+// 总览（百分比自适应版式）/ 归档页（卡片网格）/ 资源工作视图（按人清单）都没有时间轴 ——
+// 既不受缩放按钮影响，也不应劫持 Ctrl+滚轮（此时用户多半是想缩放浏览器或滚动页面）。
 function zoomEnabled(deps) {
   const v = deps.viewState.view;
-  return v !== 'report' && v !== 'arch';
+  return v !== 'report' && v !== 'arch' && v !== 'work';
 }
 
 // 缩放：设置 dayW 并重绘

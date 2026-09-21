@@ -7,7 +7,8 @@ import {
   defaultModules, defaultResources, defaultHolidays
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
-import { computePlanPct, computeModuleTag, isOverdueTask, unscheduledModSet, moduleTag } from '../src/core/mod-auto.js';
+import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag } from '../src/core/mod-tag.js';
+import { isOverdueTask } from '../src/core/task-status.js';
 import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
 
@@ -171,7 +172,7 @@ describe('core/workday (createWorkday 依赖注入)', () => {
   });
 });
 
-describe('core/mod-auto: computePlanPct 计划应达基线（时间口径，不做工作量加权）', () => {
+describe('core/mod-tag: computePlanPct 计划应达基线（时间口径，不做工作量加权）', () => {
   // 需求范围 2026-08-17 ~ 2026-08-31，日历跨度 14 天
   const rng = { start: F('2026-08-17'), end: F('2026-08-31') };
 
@@ -207,7 +208,7 @@ describe('core/mod-auto: computePlanPct 计划应达基线（时间口径，不�
   });
 });
 
-describe('core/mod-auto: isOverdueTask 逾期判定（统一口径）', () => {
+describe('core/task-status: isOverdueTask 逾期判定（统一口径）', () => {
   const today = F('2026-09-14');
 
   it('结束日已过、未完成、已分配资源 → 逾期', () => {
@@ -238,7 +239,7 @@ describe('core/mod-auto: isOverdueTask 逾期判定（统一口径）', () => {
   });
 });
 
-describe('core/mod-auto: 待排期需求（unscheduled）', () => {
+describe('core/mod-tag: 待排期需求（unscheduled）', () => {
   it('unscheduledModSet 只收 unscheduled=true 的需求', () => {
     const set = unscheduledModSet([
       { name: 'A', unscheduled: true }, { name: 'B' }, { name: 'C', unscheduled: false }
@@ -261,7 +262,7 @@ describe('core/mod-auto: 待排期需求（unscheduled）', () => {
   });
 });
 
-describe('core/mod-auto: computeModuleTag 需求状态标签', () => {
+describe('core/mod-tag: computeModuleTag 需求状态标签', () => {
   const T = F('2026-09-02');   // 周三
 
   it('全部任务完成 → 已完成', () => {

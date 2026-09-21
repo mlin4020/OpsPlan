@@ -1,16 +1,51 @@
 // 组件层测试：锁定拖拽翻转限制、只读守卫、exportHTML 回退逻辑
+//   另含 2026-09-21 拆分后的结构契约（drawers.js 曾 1112 行，现按职责拆为 5 个模块）
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
 import { defaultModules, defaultResources } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
-import { paintModHover, pickDragHandle } from '../src/components/drawers.js';
+import { bindDrawers, paintModHover, pickDragHandle } from '../src/components/drawers.js';
 import { isPanTarget } from '../src/components/drag.js';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const COMP = resolve(ROOT, 'src/components');
 
 function makeSched() {
   planStore.set({ modules: defaultModules(), resources: defaultResources() });
   return createScheduler({ planStore, userStore, W: createWorkday({}) });
+}
+
+// 组件层替身：所有 getEl 返回 null、甘特替身查不到任何元素 ——
+// 用来验证"装配过程本身"不依赖具体 DOM（拆分后最容易犯的错就是漏接线或提前取值）
+function stubDeps() {
+  return {
+    doc: { defaultView: { matchMedia: () => ({ matches: false }) }, addEventListener: () => {}, querySelector: () => null },
+    gantt: { querySelectorAll: () => [], addEventListener: () => {} },
+    gsc: { addEventListener: () => {}, scrollTop: 0, scrollLeft: 0 },
+    getEl: () => null,
+    planStore,
+    sched: {
+      problems: () => [], tasks: () => [], getTask: () => null, nameOf: () => '',
+      fmt: () => '2026-09-01', F: v => v
+    },
+    viewState: { view: 'mod', collapsed: {} },
+    render: () => {},
+    toast: () => {},
+    isReadonly: () => false,
+    today: () => new Date(2026, 8, 21),
+    workday: {},
+    PNAME: {},
+    shared: { activeTaskId: 'x', modalRes: [] },
+    bindTip: () => {},
+    consumeSuppress: () => false,
+    startBarDrag: () => {},
+    startMsDrag: () => {}
+  };
 }
 
 describe('components: 拖拽翻转限制（sched.diff 源契约）', () => {
@@ -145,5 +180,69 @@ describe('components: exportHTML 回退逻辑', () => {
     expect(typeof s).toBe('string');
     const parsed = JSON.parse(s);
     expect(Array.isArray(parsed.modules)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 拆分后的结构契约：drawers.js 原 1112 行，按"谁和谁共享可变状态"拆成 5 个模块。
+// 这几条测试钉住的是拆分最容易退化的三点：装配漏接线、入口重新长胖、模块间成环。
+// ---------------------------------------------------------------------------
+describe('components: 抽屉与甘特交互的拆分契约', () => {
+  const PARTS = ['drawer-shell.js', 'task-drawer.js', 'problem-drawer.js', 'menu-actions.js', 'gantt-interactions.js'];
+
+  it('拆出的模块都在，且 drawers.js 只做装配（不重新长回实现）', () => {
+    PARTS.forEach(m => expect(existsSync(resolve(COMP, m))).toBe(true));
+    const src = readFileSync(resolve(COMP, 'drawers.js'), 'utf8');
+    ['drawer-shell.js', 'task-drawer.js', 'problem-drawer.js', 'gantt-interactions.js']
+      .forEach(m => expect(src).toContain(`'./${m}'`));
+    // 装配入口本该只有几十行；超过 90 行说明实现又往回堆了
+    expect(src.split('\n').length).toBeLessThan(90);
+    // 已删除的旧实现不应再被任何地方引用
+    expect(existsSync(resolve(ROOT, 'src/core/mod-auto.js'))).toBe(false);
+  });
+
+  it('bindDrawers 返回完整 API，且装配过程不依赖具体 DOM（空跑不报错）', () => {
+    const api = bindDrawers(stubDeps());
+    ['openTaskDrawer', 'openNewTaskDrawer', 'openProblemDrawer', 'closeDrawer',
+      'updateProblemBadge', 'renderProbList', 'renderResPicker', 'bindGanttInteractions']
+      .forEach(k => expect(typeof api[k]).toBe('function'));
+    expect(() => api.bindGanttInteractions()).not.toThrow();
+    expect(() => api.openTaskDrawer('不存在')).not.toThrow();   // getTask 返回 null → 静默返回
+    expect(() => api.updateProblemBadge()).not.toThrow();
+    expect(() => api.renderProbList()).not.toThrow();
+    expect(() => api.renderResPicker()).not.toThrow();
+    expect(() => api.closeDrawer()).not.toThrow();
+  });
+
+  it('关闭抽屉会清掉"当前打开的任务"（跨模块收尾由 drawer-shell 统一触发）', () => {
+    const deps = stubDeps();
+    const api = bindDrawers(deps);
+    expect(deps.shared.activeTaskId).toBe('x');
+    api.closeDrawer();
+    expect(deps.shared.activeTaskId).toBe(null);
+  });
+
+  it('组件层无循环依赖（成环会让模块级状态读到未初始化的值）', () => {
+    const files = PARTS.concat(['drawers.js', 'context-menu.js', 'modals.js', 'reslib.js', 'toolbar.js', 'drag.js', 'shell.js', 'index.js', 'theme-picker.js', 'loading.js', 'sync-status.js']);
+    const deps = new Map();
+    files.forEach(f => {
+      const src = readFileSync(resolve(COMP, f), 'utf8');
+      const out = new Set();
+      const re = /from\s*'\.\/([\w.-]+\.js)'/g;
+      let m;
+      while ((m = re.exec(src))) out.add(m[1]);
+      deps.set(f, out);
+    });
+    const cycles = [];
+    const seen = new Set(), stack = [];
+    const dfs = n => {
+      if (stack.includes(n)) { cycles.push(stack.slice(stack.indexOf(n)).concat(n).join(' → ')); return; }
+      if (seen.has(n)) return;
+      seen.add(n); stack.push(n);
+      for (const d of deps.get(n) || []) if (deps.has(d)) dfs(d);
+      stack.pop();
+    };
+    files.forEach(dfs);
+    expect(cycles).toEqual([]);
   });
 });

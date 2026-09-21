@@ -7,6 +7,7 @@
 //   1) 读取 #plan-data 中注入的排期数据（__PLAN_DATA__ 占位符被替换后的 JSON）
 //   2) 注入数据为空/未替换 → 显示"此文件缺少排期数据"空态，绝不回退默认数据
 //   3) 只读渲染三种视图：总览 / 甘特图 / 工作组规划器（冻结表头+左侧列，左右滑动）
+//      另有资源工作视图（按人清单，带筛选），支持 ?view=work&me=某人 直接落到某个人的任务
 //   4) 工具栏仅保留：缩放粒度（日/周/月 + 滑块）与视图切换
 //   5) 不初始化任何编辑组件（无拖拽/抽屉/弹窗/资源库），不写 localStorage
 // ============================================================
@@ -15,8 +16,10 @@ import { planStore } from './store/plan-store.js';
 import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays } from './core/default-data.js';
+import { defaultWorkFilter } from './core/work-filter.js';
 import { createScheduler } from './scheduler/index.js';
 import { buildViewerShellHTML } from './components/shell.js';
+import { bindWorkFilter } from './components/work-filter.js';
 import { renderAll } from './views/index.js';
 import { restoreTheme } from './utils/theme.js';
 
@@ -46,7 +49,8 @@ function boot() {
   // 注意：必须先读取注入数据（#plan-data script），
   // 再重建 body——innerHTML 替换会销毁原有 script 元素。
   const params = new URLSearchParams(location.search);
-  const viewFromQuery = ['res', 'report', 'mod'].includes(params.get('view')) ? params.get('view') : 'mod';
+  // 白名单与主壳保持一致（含 work / arch），未知值回退默认视图
+  const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work'].includes(params.get('view')) ? params.get('view') : 'mod';
   const injected = readInjectedPlan();
 
   // 只读查看器同样跟随已选配色（file:// 下 localStorage 不可用时静默降级为默认色）
@@ -79,7 +83,11 @@ function boot() {
   if (hTitle && injected && injected.name) hTitle.textContent = injected.name;
 
   // ---- 渲染 ctx（只读：无 ctxInjection 组件注入） ----
-  const viewState = { view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: ZOOM_DAYW.day };
+  // ?me=某人：资源工作视图的"看自己"深链，与排期页同一套口径（导出件发给个人时尤其好用）
+  const viewState = {
+    view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: ZOOM_DAYW.day,
+    workFilter: { ...defaultWorkFilter(), person: (params.get('me') || '').trim() }
+  };
   const baseCtx = {
     state: planStore.state,
     sched,
@@ -97,6 +105,7 @@ function boot() {
       zoom: viewState.zoom,
       dayW: viewState.dayW,
       collapsed: viewState.collapsed,
+      workFilter: viewState.workFilter,
       // 未显式指定时保持 undefined：renderAll 会沿用当前滚动位置（传 0 会被当作"滚到最左"）
       scrollLeft: typeof sc === 'number' ? sc : undefined
     };
@@ -104,12 +113,20 @@ function boot() {
   function render(sc) {
     renderAll(buildCtx(sc));
   }
+  // 筛选条事件（共用组件层实现）：查看器没有组件层，这里单独绑一次，否则筛选条点了没反应
+  bindWorkFilter({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render });
 
   // ---- 工具栏：视图切换 + 缩放（日/周/月 + 滑块） ----
   const syncViewBtns = () => document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === viewState.view));
   const syncZoomBtns = () => document.querySelectorAll('[data-z]').forEach(b => b.classList.toggle('on', b.dataset.z === viewState.zoom));
-  // 总览（汇报）视图是纯汇报界面：隐藏缩放分组（shell.js 中带 data-report-hide），只留视图切换
-  const syncToolbarForView = () => document.body.classList.toggle('report-view', viewState.view === 'report');
+  // 非时间轴视图（总览 / 归档 / 资源工作视图）：隐藏缩放等分组（shell.js 中带 data-report-hide），
+  // 只留视图切换。与主壳 toolbar.js 的 syncToolbarForView 用同一套 body class，三处视图口径保持一致
+  const syncToolbarForView = () => {
+    const v = viewState.view;
+    document.body.classList.toggle('report-view', v === 'report');
+    document.body.classList.toggle('work-view', v === 'work');
+    document.body.classList.toggle('arch-view', v === 'arch');
+  };
   const applyZoom = dw => {
     viewState.dayW = Math.max(2, Math.min(40, Math.round(dw)));
     const zs = document.getElementById('zs'); if (zs) zs.value = viewState.dayW;

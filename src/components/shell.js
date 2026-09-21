@@ -24,6 +24,9 @@ const MI = {
   report: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.2" y="3.2" width="7" height="8.6" rx="1.8"/><rect x="13.8" y="3.2" width="7" height="5" rx="1.8"/><rect x="13.8" y="11.4" width="7" height="9.4" rx="1.8"/><rect x="3.2" y="15" width="7" height="5.8" rx="1.8"/></svg>',
   mod: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="2.6" y="4.2" width="10.5" height="3.6" rx="1.8"/><rect x="8" y="10.2" width="13.4" height="3.6" rx="1.8"/><rect x="4.6" y="16.2" width="9" height="3.6" rx="1.8"/></svg>',
   res: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.2" cy="8" r="3.2"/><path d="M3.4 19.6c0-3.1 2.6-5 5.8-5s5.8 1.9 5.8 5"/><path d="M16.2 5.6a3.2 3.2 0 0 1 0 6.2"/><path d="M17.6 14.9c1.9.7 3.1 2.3 3.1 4.7"/></svg>',
+  // 工作视图：清单图标（勾选 + 三行）—— 与 res 的人形图标刻意区分：
+  // res 是"按时间轴看人"，work 是"按清单看活"
+  work: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.2 4.4 7.8l2.6-2.9"/><path d="M2.8 12.4 4.4 14l2.6-2.9"/><path d="M2.8 18.6 4.4 20.2l2.6-2.9"/><path d="M11.2 6.6h10"/><path d="M11.2 13h10"/><path d="M11.2 19.4h10"/></svg>',
   arch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.2" rx="1.6"/><path d="M4.6 8.2v10.2a1.6 1.6 0 0 0 1.6 1.6h11.6a1.6 1.6 0 0 0 1.6-1.6V8.2"/><path d="M9.6 12.6h4.8"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5.2" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.8" cy="12" r="1.7"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
@@ -41,7 +44,8 @@ function mobileNavHTML(withMore) {
   <button class="mnav-item" data-view="report">${MI.report}<span>总览</span></button>
   <button class="mnav-item" data-view="mod">${MI.mod}<span>甘特图</span></button>
   <button class="mnav-item" data-view="res">${MI.res}<span>规划器</span></button>
-  <button class="mnav-item" data-view="arch">${MI.arch}<span>归档</span><span class="badge mnav-badge" id="archNavCountM" hidden>0</span></button>${more}
+  <button class="mnav-item" data-view="work">${MI.work}<span>工作视图</span></button>
+  <button class="mnav-item" data-view="arch">${MI.arch}<span>归档</span><span class="badge mnav-badge badge-neutral" id="archNavCountM" hidden>0</span></button>${more}
 </nav>`;
 }
 
@@ -93,7 +97,8 @@ export function buildViewerShellHTML() {
     <button class="btn" data-view="report">总览</button>
     <button class="btn" data-view="mod">甘特图</button>
     <button class="btn" data-view="res">工作组规划器</button>
-    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge" id="archNavCount" hidden>0</span></button>
+    <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
+    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>
     <button class="btn on" data-z="day">日</button>
@@ -140,7 +145,8 @@ export function buildShellHTML() {
     <button class="btn" data-view="report">总览</button>
     <button class="btn" data-view="mod">甘特图</button>
     <button class="btn" data-view="res">工作组规划器</button>
-    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge" id="archNavCount" hidden>0</span></button>
+    <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
+    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>
     <button class="btn on" data-z="day">日</button>

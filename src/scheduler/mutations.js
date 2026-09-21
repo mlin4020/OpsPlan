@@ -10,7 +10,7 @@
 import { F } from './planning.js';
 import { fmt, addDays } from '../core/dates.js';
 import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
-import { milestoneName } from '../core/mod-auto.js';
+import { milestoneName } from '../core/mod-tag.js';
 import { userStore } from '../store/user-store.js';
 
 // 只读守卫：编辑类入口统一从这里过（throw 语义用于"新增"类，其余静默 return）

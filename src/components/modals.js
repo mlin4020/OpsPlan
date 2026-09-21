@@ -7,7 +7,8 @@
 // 依赖注入（deps）：sched/planStore/render/toast/getEl/（新增需求需 deps.viewState.collapsed 写折叠态）
 // 只读：可编辑守卫在 SCHED 内（addModule 抛错），此处 UI 由工具栏 disabled 禁用
 // ============================================================
-import { moduleTag, computeModulePer, nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-auto.js';
+import { moduleTag, computeModulePer } from '../core/mod-tag.js';
+import { nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-color.js';
 import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
 
 let modEditName = null;   // 编辑模式：当前正在编辑的需求名（null=新增模式）

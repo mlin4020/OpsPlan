@@ -8,7 +8,7 @@ import { userStore } from '../src/store/user-store.js';
 import { defaultModules, defaultResources } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
-import { archivedModSet } from '../src/core/mod-auto.js';
+import { archivedModSet } from '../src/core/mod-tag.js';
 import { renderModView } from '../src/views/mod-view.js';
 import { renderArchiveView } from '../src/views/archive-view.js';
 import { F } from '../src/core/dates.js';

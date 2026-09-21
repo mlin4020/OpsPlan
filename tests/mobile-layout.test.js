@@ -175,7 +175,8 @@ describe('移动端：抽屉可关闭', () => {
     expect(css).toMatch(/body\.arch-view \[data-report-hide\]:not\(\.stats\)\{display:none\}/);
     expect(css).toMatch(/body\.arch-view \.msheet-item\[data-zoom-only\]\{display:none\}/);
     // 归档页没有时间轴，缩放对它无意义（且不该劫持 Ctrl+滚轮）
-    expect(toolbar).toMatch(/return v !== 'report' && v !== 'arch';/);
+    // —— 资源工作视图（work）同属非时间轴视图，一并排除，故这条断言的钉死文本随之扩展
+    expect(toolbar).toMatch(/return v !== 'report' && v !== 'arch' && v !== 'work';/);
     // 手机顶栏的 ＋任务 / 排期问题 属于排期操作，必须跟着一起收敛
     expect(html).toMatch(/class="hero-acts" data-report-hide/);
   });
@@ -193,7 +194,8 @@ describe('移动端：抽屉可关闭', () => {
   it('需求抽屉关闭态用 .open（抽屉语义），且 Esc / 遮罩 / 手柄都能关', () => {
     const modals = readFileSync(resolve(ROOT, 'src/components/modals.js'), 'utf8');
     const index = readFileSync(resolve(ROOT, 'src/components/index.js'), 'utf8');
-    const drawers = readFileSync(resolve(ROOT, 'src/components/drawers.js'), 'utf8');
+    // 移动端下拉关闭的实现在抽屉外壳模块（drawers.js 已瘦身为装配入口，见其文件头）
+    const drawerShell = readFileSync(resolve(ROOT, 'src/components/drawer-shell.js'), 'utf8');
     // 开关都是抽屉语义的 .open（不是弹窗的 .show）
     expect(modals).toMatch(/getEl\('modNewDrawer'\)/);
     expect(modals).toMatch(/classList\.add\('open'\)/);
@@ -204,7 +206,7 @@ describe('移动端：抽屉可关闭', () => {
     expect(index).toMatch(/getElementById\('modNewDrawer'\)[\s\S]*?classList\.contains\('open'\)/);
     expect(index).not.toMatch(/getElementById\('modNewModal'\)/);
     // 移动端下拉关闭：手柄/头部拖拽超阈值即收
-    expect(drawers).toMatch(/'taskDrawer', 'probDrawer', 'modNewDrawer'/);
+    expect(drawerShell).toMatch(/'taskDrawer', 'probDrawer', 'modNewDrawer'/);
   });
 });
 
@@ -286,6 +288,21 @@ describe('内容区：可读性与层次（桌面/移动共用）', () => {
     expect(css).not.toMatch(/nth-child\(even\)/);
   });
 
+  it('需求行折行后，右侧轨道必须跟着撑高（否则进度条跑出行外）', () => {
+    // 左列只有 200px，放不下「名字 + 优先级 + 状态 + 周期 + 人员」时折行，行高由内容撑开
+    expect(css).toMatch(/\.gbody \.mod-row\{position:relative;min-height:34px;height:auto/);
+    expect(css).toMatch(/\.gbody \.mod-row \.mname\{[^}]*white-space:normal/);
+    expect(css).toMatch(/\.gbody \.mod-row \.mname-main\{[^}]*flex-wrap:wrap/);
+    expect(css).toMatch(/\.gbody \.mod-row \.mname-sub\{[^}]*flex-wrap:wrap/);
+    // 关键：.track 的子元素全是绝对定位、自身内容高度为 0，只留 .track{height:100%}
+    // 会在 height:auto 的行里解析成 0 高 —— 进度条/今天线/假期带会集体跑出行外（"进度条和需求错位"）。
+    // stretch 只对交叉轴尺寸为 auto 的元素生效，所以 height:auto 和 align-self 必须成对出现。
+    expect(css).toMatch(/\.gbody \.mod-row \.track\{align-self:stretch;height:auto\}/);
+    // 任务行/资源行行高固定，不能被牵连放开折行（否则第二行被裁成半行残字）
+    expect(css).not.toMatch(/\.gbody \.bar-row \.mname\{[^}]*white-space:normal/);
+    expect(css).not.toMatch(/\.gbody \.res-row \.mname\{[^}]*white-space:normal/);
+  });
+
   it('工作组规划器：人与人的行距拉开，单泳道也给足高度', () => {
     const resView = readFileSync(resolve(ROOT, 'src/views/res-view.js'), 'utf8');
     // 单泳道 52px（原 38px），多泳道 28px/条 —— 相邻两人的任务条不能再贴在一起
@@ -343,6 +360,20 @@ describe('工具栏：分段控件与按钮质感', () => {
     const modView = readFileSync(resolve(ROOT, 'src/views/mod-view.js'), 'utf8');
     expect(modView).toMatch(/res-chip-txt/);
     expect(modView).toMatch(/\|\| '#94a3b8'/);
+  });
+
+  it('归档入口的数量徽标用中性灰，不占用「问题 / 逾期」的红色语义', () => {
+    const html = buildShellHTML();
+    // 红色在本项目专指"有问题/逾期"（排期问题徽标、逾期数字）；归档只是计数，
+    // 红点会让人以为归档里出了状况。桌面工具栏 ×2 + 移动端底部导航 ×1 都挂中性类。
+    expect(html).toContain('class="badge badge-neutral" id="archNavCount"');
+    expect(html).toContain('class="badge mnav-badge badge-neutral" id="archNavCountM"');
+    // 导出单文件（只读查看器）里的归档入口同样是中性色
+    expect(buildViewerShellHTML()).toContain('class="badge badge-neutral" id="archNavCount"');
+    expect(css).toMatch(/\.badge-neutral\{background:var\(--slate\)\}/);
+    // 默认徽标仍是红，问题徽标不得被改成中性色
+    expect(css).toMatch(/\.badge\{[^}]*background:var\(--red\)/);
+    expect(html).toMatch(/class="badge" id="probCount"/);
   });
 });
 

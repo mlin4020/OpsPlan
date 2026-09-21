@@ -13,6 +13,7 @@ import { planStore } from './store/plan-store.js';
 import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays, PNAME } from './core/default-data.js';
+import { defaultWorkFilter } from './core/work-filter.js';
 import { createScheduler } from './scheduler/index.js';
 import { bindAll } from './components/index.js';
 import { buildShellHTML, showFullLoading } from './components/shell.js';
@@ -26,7 +27,13 @@ import { createPlanSync } from './services/plan-sync.js';
 // 解析项目参数
 const params = new URLSearchParams(location.search);
 const projectId = params.get('project');
-const viewFromQuery = ['res', 'report', 'mod'].includes(params.get('view')) ? params.get('view') : 'report';
+// 白名单里的键必须与 shell.js 的 data-view 一致（含 work / arch）；
+// 不在白名单里的值静默回退默认视图 —— 拼错的 ?view=xxx 会表现为"链接打不开"
+const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work'].includes(params.get('view')) ? params.get('view') : 'report';
+// ?me=某人：资源工作视图的"看自己"深链（如 ?view=work&me=张三）。
+// 没有账号与资源人名的映射关系（Supabase 用户 ≠ 资源库人名），故用 URL 参数代替"我是谁"，
+// 员工把自己的链接存成书签即可一步到位，无需在系统里维护身份映射。
+const meFromQuery = (params.get('me') || '').trim();
 
 // 必须从项目列表带 project 参数进入
 if (!projectId) {
@@ -62,7 +69,12 @@ function boot() {
   }
 
   // 视图状态（toolbar 读写；renderAll 读取）
-  const viewState = { view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: 13, archOpen: false };
+  const viewState = {
+    view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: 13, archOpen: false,
+    // 资源工作视图的筛选条件（人员 / 状态 / 优先级 / 关键词）。放 viewState 而不是写进 URL：
+    // 切换视图来回时不丢，且不污染地址栏；只有 ?me= 这一项刻意走 URL（便于分享"我的任务"链接）
+    workFilter: { ...defaultWorkFilter(), person: meFromQuery }
+  };
   // 工作日计算（注入本地兜底假期）
   const workday = createWorkday({ holidays: defaultHolidays() });
 
@@ -96,6 +108,7 @@ function boot() {
       dayW: viewState.dayW,
       collapsed: viewState.collapsed,
       archOpen: viewState.archOpen,
+      workFilter: viewState.workFilter,
       // 未显式指定时保持 undefined：renderAll 会沿用当前滚动位置（传 0 会被当作"滚到最左"）
       scrollLeft: typeof sc === 'number' ? sc : undefined,
       ...(ui ? ui.ctxInjection : {})

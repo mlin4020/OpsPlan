@@ -65,6 +65,10 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:10px;font-weight:800;margin-left:4px;line-height:1}
 .badge[hidden]{display:none}
 .badge.readonly{background:var(--amber)}
+/* 计数类徽标（当前唯一用户：「归档」入口的已归档数量）：中性灰，不用红。
+   红色在本项目是"有问题/逾期"的数据语义（排期问题徽标、逾期数字都走红），
+   归档只是一个数量，红点会让人误以为归档里出了状况。 */
+.badge-neutral{background:var(--slate)}
 .sync-info{font-size:11px;color:var(--muted);max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sync-info.fail{color:var(--red);font-weight:600}
 .sync-info.ok{color:var(--green)}
@@ -94,7 +98,7 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .dcell.mkup{color:var(--accent-ink);background:var(--accent-soft)}
 .wcell.mkup{color:var(--accent-line)}
 .dcell.weeksep{border-left:2px solid #dbe3ee}
-.gbody .mod-row{position:relative;height:34px;border-bottom:1px solid var(--line);background:#f2f6fc;cursor:pointer;-webkit-user-select:none;user-select:none}
+.gbody .mod-row{position:relative;min-height:34px;height:auto;align-items:stretch;border-bottom:1px solid var(--line);background:#f2f6fc;cursor:pointer;-webkit-user-select:none;user-select:none}
 .gbody .mod-row:hover{background:#e7eefb}
 .gbody .bar-row{height:29px;border-bottom:1px solid #e2eaf4;transition:background .12s}
 .gbody .bar-row:hover,.gbody .res-row:hover{background:#e9f2fd}
@@ -123,6 +127,23 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .gbody .mod-row .mod-edit-btn{position:sticky;left:calc(var(--mname-w) - 18px);z-index:60;flex:none;align-self:center;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;color:#fff;background:#94a3b8;border-radius:5px;cursor:pointer;opacity:.85;transition:background .15s,opacity .15s;box-shadow:0 1px 3px #0f172a2e;margin-right:-18px}
 .gbody .mod-row .mod-edit-btn:hover{background:var(--blue);opacity:1}
 .gbody .mod-row:hover .mod-edit-btn{opacity:1}
+/* 需求行左列允许折行（桌面端）。
+   左列只有 var(--mname-w)（200px），一行却要塞下「色点 + 名字 + 优先级 + 状态 + 周期 + 人员」，
+   原先的 nowrap 会把末尾的周期/人员整块裁掉，看不出这条需求排了多久、归谁 —— 用户要求
+   "一行放不开就换行"。现在：名字过长时自身折行（最多两行，超出省略，title 仍可看全），
+   次要信息（优先级/状态/周期/人员）整块落到下一行并继续按需折行，行高由内容撑开
+   （min-height 34px 保证单行时版式不变）。
+   注意：只放开需求行 —— 任务行/资源行行高固定，放开会出现被裁掉半截的字。
+   右侧 .track 必须跟着行一起变高（行高不再是写死的 34px），且两条缺一不可：
+   ① .mod-row 上 align-items:stretch；② .track 的 height:auto 覆盖掉 .track{height:100%}
+   —— height:100% 在"高度由内容决定"的父容器里会塌成 0（stretch 只对交叉轴尺寸为 auto 的元素生效，
+   而 height:100% 不是 auto，把它挡在门外）。踩过一次：只加 stretch 时 track 高度实测 0，
+   时间轴上的进度条/今天线/假期带全跑到行外，表现为"进度条和需求错位"。 */
+.gbody .mod-row .mname{white-space:normal;padding-top:5px;padding-bottom:5px}
+.gbody .mod-row .track{align-self:stretch;height:auto}
+.gbody .mod-row .mname-main{flex-wrap:wrap;row-gap:3px;align-content:center}
+.gbody .mod-row .mname-txt{white-space:normal;overflow-wrap:anywhere;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.gbody .mod-row .mname-sub{flex-wrap:wrap;row-gap:3px;align-content:center}
 .bar-row .mname{font-size:11px;color:var(--muted);font-weight:500}
 .bar-row .mname .steel{width:3px;height:16px;border-radius:2px;flex:none}
 .res-row .mname{font-size:11px;font-weight:600;color:#334155}
@@ -320,6 +341,8 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%) translateY(10px);background:#0f1729;color:#e2e8f0;font-size:12px;font-weight:600;padding:9px 18px;border-radius:10px;box-shadow:0 10px 30px #0f172a4d;opacity:0;pointer-events:none;transition:all .25s;z-index:500}
 .toast.show{opacity:1;transform:translate(-50%) translateY(0)}
 body.report-view [data-report-hide]{display:none}
+/* 资源工作视图与总览一样自带指标条，hero 统计重复 —— 整块收敛（不像归档页那样 :not(.stats)） */
+body.work-view [data-report-hide]{display:none}
 /* 归档页同样收敛工具栏（只留视图切换 + 服务器组），但保留 hero 统计：
    归档页没有自己的指标条，把统计也藏了顶栏就空了。 */
 body.arch-view [data-report-hide]:not(.stats){display:none}
@@ -514,6 +537,94 @@ body.arch-view [data-report-hide]:not(.stats){display:none}
 .drawer{width:320px}
 .report-cols{gap:14px}
 }
+/* ============ 资源工作视图（按人汇总的任务清单，由顶部「资源工作视图」入口进入） ============
+   与「工作组规划器」的分工：规划器是时间轴视角（一人一行画在日历上，看忙不忙 / 有没有撞车），
+   本页是清单视角（一人一块，任务逐条列出优先级 / 状态 / 日期 / 进度），窄屏不需要横向平移。
+   骨架复用总览 / 归档页的整页文档形态（.gantt.report-mode + .report-wrap/.report-sec/
+   .report-metrics/.arch-empty），这里只补清单自己的 .rwk-* 规则。
+   两个刻意不复用的地方：
+     · 状态徽标复用 .tag（底色由 mod-auto.js 的 taskStatus 给数据色内联），不另立一套状态样式；
+     · 进度条**不**复用 .rmod-pct-bar —— 它在中屏被改写成 flex:1（见下方断点），
+       在本页的 inline-flex 行内会塌成 2px，故自带 .rwk-bar。
+   位置说明：基础规则必须排在下面那个手机端主断点**之前**，否则同优先级的桌面声明
+   会在文件顺序上压过窄屏声明（手机端反而变回桌面版式）；窄屏覆盖放在手机主断点之前、
+   但保持"≤767px 块里最后一个"是主断点（tests/mobile-layout.test.js 的 phoneCss 取的是最后一个）。 */
+.rwk-people{display:flex;flex-direction:column;gap:9px}
+.rwk-person{background:#fbfcfe;border:1px solid #eef2f7;border-radius:10px;padding:8px 10px}
+.rwk-person.is-unassigned{background:#fffbf5;border-color:#f6e2c6}
+.rwk-ph{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:2px 3px 8px;border-bottom:1px solid #eef2f7;margin-bottom:5px}
+.rwk-person.is-idle .rwk-ph,.rwk-person.is-unassigned .rwk-ph{border-bottom:none;margin-bottom:0;padding-bottom:2px}
+.rwk-pname{flex:0 0 auto;font-size:12.5px;font-weight:800;color:#0f1729}
+/* 人名即筛选入口：点一下只看这个人，再点一下回到全部（手机端原生下拉难用，这是最快路径） */
+button.rwk-pname{border:none;background:none;padding:0;font-family:inherit;cursor:pointer}
+button.rwk-pname:hover,button.rwk-pname.on{color:var(--blue)}
+.rwk-pstat{margin-left:auto;display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10.5px;font-weight:600;color:#64748b}
+.rwk-pstat b{font-size:12px;font-weight:800;color:#0f1729;font-variant-numeric:tabular-nums}
+.rwk-pstat i{font-style:normal;color:#cbd5e1}
+.rwk-pstat em{font-style:normal;border-radius:5px;padding:1px 6px}
+.rwk-pstat em.is-doing{color:#b45309;background:#fef3c7}
+.rwk-pstat em.is-overdue{color:#b91c1c;background:#fee2e2}
+.rwk-list{display:flex;flex-direction:column}
+.rwk-row{display:grid;align-items:center;gap:6px 10px;padding:7px 4px;border-radius:8px;grid-template-columns:3px minmax(0,1fr) auto auto auto auto;grid-template-areas:"steel main pri state dates prog"}
+.rwk-row + .rwk-row{border-top:1px solid #f1f5f9}
+/* 行区分靠分隔线 + 整行 hover（全站不用斑马纹） */
+.rwk-row:hover{background:#fff}
+/* 阶段色条：沿用需求明细行的 .steel 类名，本页做成竖条，阶段一眼可辨 */
+.rwk-row .steel{grid-area:steel;width:3px;height:20px;border-radius:2px}
+/* 名字一律允许换行，不用省略号：这一页就是用来核对"谁在做什么"的 */
+.rwk-main{grid-area:main;display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0}
+.rwk-name{flex:0 1 auto;min-width:0;overflow-wrap:anywhere;font-size:12px;font-weight:700;color:#0f1729}
+.rwk-phase{flex:none;font-size:9px;font-weight:800;border-radius:4px;padding:1px 5px;border:1px solid;white-space:nowrap}
+.rwk-mod{display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:10.5px;font-weight:600;color:#64748b}
+.rwk-mod-t{min-width:0;overflow-wrap:anywhere}
+.rwk-chip{flex:none;font-size:9px;font-weight:700;border-radius:4px;padding:1px 6px;color:#64748b;background:#f1f5f9}
+.rwk-pri{grid-area:pri;display:inline-flex;align-items:center}
+.rwk-state{grid-area:state;white-space:nowrap}
+.rwk-dates{grid-area:dates;font-size:10.5px;font-weight:600;color:#64748b;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rwk-dates i{font-style:normal;color:#94a3b8;margin-left:6px}
+.rwk-prog{grid-area:prog;display:inline-flex;align-items:center;gap:6px;justify-self:end}
+.rwk-bar{flex:none;display:inline-block;width:44px;height:5px;border-radius:3px;background:#e2e8f0;overflow:hidden}
+.rwk-bar i{display:block;height:100%;border-radius:3px;min-width:2px}
+.rwk-pct{font-size:10.5px;font-weight:800;color:#64748b;min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+/* 图例：状态色是数据色（不随主题换肤），写死与 .tag 底色同一套 */
+.rwk-legend{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:10px;padding-top:9px;border-top:1px solid #eef1f6;font-size:10.5px;font-weight:600;color:#64748b}
+.rwk-legend span{display:inline-flex;align-items:center;gap:5px}
+.rwk-legend i{width:9px;height:9px;border-radius:3px}
+.rwk-legend-hint{margin-left:auto;color:#94a3b8;font-weight:500}
+/* 筛选条：这一页最常用的动作是"员工查自己手里的活"，筛选必须能不翻页就定位到人。
+   控件一律用原生 input/select/button —— 导出单文件里没有组件层，原生控件配事件委托最省事，
+   手机端还直接复用系统选择器；选中态用品牌色（--accent），状态 chip 另带一枚数据色圆点。 */
+.rwk-tools{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:0 0 10px;border-bottom:1px solid #eef1f6;margin-bottom:9px}
+.rwk-f-q{flex:0 1 180px;min-width:120px;height:30px;padding:0 9px;border:1px solid #dbe3ee;border-radius:8px;background:#fff;font-family:inherit;font-size:11.5px;color:#0f1729;outline:none}
+.rwk-f-q::placeholder{color:#a9b6c7}
+.rwk-f-q:focus{border-color:var(--blue)}
+.rwk-f-person{flex:0 0 auto;max-width:170px;height:30px;padding:0 6px;border:1px solid #dbe3ee;border-radius:8px;background:#fff;font-family:inherit;font-size:11.5px;font-weight:600;color:#334155;cursor:pointer;outline:none}
+.rwk-f-person:focus{border-color:var(--blue)}
+.rwk-f-chips{display:inline-flex;align-items:center;flex-wrap:wrap;gap:5px}
+.rwk-f-chip{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px;border:1px solid #dbe3ee;border-radius:999px;background:#fff;font-family:inherit;font-size:11px;font-weight:700;color:#475569;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s,background .15s}
+.rwk-f-chip:hover{border-color:#c3cee0}
+.rwk-f-chip i{width:7px;height:7px;border-radius:2px}
+.rwk-f-chip.on{background:var(--accent-soft);border-color:var(--blue);color:var(--blue)}
+.rwk-f-reset{margin-left:auto;height:26px;padding:0 11px;border:1px solid #dbe3ee;border-radius:999px;background:#fff;font-family:inherit;font-size:11px;font-weight:700;color:#64748b;cursor:pointer;white-space:nowrap;transition:border-color .15s,color .15s}
+.rwk-f-reset:hover:not(:disabled){border-color:var(--blue);color:var(--blue)}
+.rwk-f-reset:disabled{opacity:.45;cursor:default}
+.rwk-f-reset-lg{margin-top:4px;height:32px;padding:0 16px;border:1px solid var(--blue);border-radius:9px;background:var(--accent-soft);font-family:inherit;font-size:12px;font-weight:800;color:var(--blue);cursor:pointer}
+/* 窄屏：任务行折成两行（日期与进度下移），纵向空间换横向空间 ——
+   目标是不出现横向平移，也不靠省略号藏名字 */
+@media (max-width:767px){
+.rwk-person{padding:7px 8px}
+.rwk-pstat{margin-left:0;flex:1 1 100%}
+.rwk-row{grid-template-columns:3px minmax(0,1fr) auto auto;grid-template-areas:"steel main pri state" "steel dates dates prog";gap:4px 8px}
+.rwk-dates i{display:none}
+.rwk-bar{width:38px}
+.rwk-legend-hint{display:none}
+/* 筛选条：搜索框独占一行、人员下拉与重置同行、状态/优先级各占一行 ——
+   窄屏横向空间不够，堆在一行会挤出横向滚动 */
+.rwk-tools{gap:6px}
+.rwk-f-q{flex:1 1 100%;min-width:0}
+.rwk-f-person{flex:1 1 auto;max-width:none;min-width:0}
+.rwk-f-chips{width:100%}
+}
 @media (max-width:767px){:root{--mname-w:146px}
 body{padding-bottom:calc(58px + env(safe-area-inset-bottom))}
 .hero{position:relative;padding:12px 14px 13px;gap:0;flex-direction:column;align-items:stretch;padding-top:calc(12px + env(safe-area-inset-top));background:var(--hero);border-bottom:1px solid var(--hero-deep)}
@@ -554,6 +665,7 @@ body.msheet-open .mnav-item#mMore{color:var(--blue);background:var(--accent-soft
 body.with-server .msheet-item[data-server-only]{display:flex}
 body.report-view .msheet-item[data-zoom-only]{display:none}
 body.arch-view .msheet-item[data-zoom-only]{display:none}
+body.work-view .msheet-item[data-zoom-only]{display:none}
 .msheet-cancel{margin-top:10px;min-height:48px;border-radius:12px;border:none;background:#f1f5f9;color:#475569;font-size:13px;font-weight:800;font-family:inherit;cursor:pointer}
 .toolbar.toolbar-full,.view-nav{display:none}
 .toolbar:not(.toolbar-full){flex-wrap:nowrap;overflow-x:auto;gap:10px;padding:7px 12px;scrollbar-width:none}
@@ -708,4 +820,5 @@ body.arch-view .msheet-item[data-zoom-only]{display:none}
      卡片网格在手机上是单列（.rmod-grid 由断点控制），与总览一致，无需另做版式。 */
   .rmod-unarch{width:32px;height:32px;font-size:15px}
 }
+
 

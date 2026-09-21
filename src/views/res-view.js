@@ -6,7 +6,7 @@
 // ============================================================
 import { F } from '../core/dates.js';
 import { bands, barHtml } from './mod-view.js';
-import { archivedModSet } from '../core/mod-auto.js';
+import { archivedModSet } from '../core/mod-tag.js';
 
 export function renderResView(container, ctx, conflictSet) {
   const { state, sched } = ctx;

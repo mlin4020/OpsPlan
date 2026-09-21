@@ -25,3 +25,4 @@ supabase-config.js
 
 # 发布平台标记文件（自动生成，无需入库）
 .wbapp_*.genie
+*.log
