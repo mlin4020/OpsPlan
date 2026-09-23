@@ -22,6 +22,7 @@ import { PNAME as defaultPNAME } from '../core/default-data.js';
 import { bindToolbar } from './toolbar.js';
 import { bindWorkFilter } from './work-filter.js';
 import { bindVersionPage } from './version-page.js';
+import { bindReqPage } from './req-page.js';
 import { bindDrawers } from './drawers.js';
 import { bindModals } from './modals.js';
 import { bindResLib } from './reslib.js';
@@ -64,6 +65,8 @@ export function bindAll(rawDeps) {
   const workFilter = bindWorkFilter(deps);
   // 版本（迭代）页面：同样把 [data-ver-*] 委托在 #gantt 上，一次绑定
   const versionPage = bindVersionPage(deps);
+  // 需求台账页：把 [data-req-*] 委托在 #gantt 上，一次绑定
+  const reqPage = bindReqPage(deps);
   const setSync = bindSetSync(deps);
   const themePicker = bindThemePicker(deps);
   deps.reslib = reslib;  // 供抽屉内「管理资源」入口点击时调用
@@ -104,7 +107,8 @@ export function bindAll(rawDeps) {
     updateProblemBadge: () => drawers.updateProblemBadge(),
     openProblemDrawer: () => drawers.openProblemDrawer(),
     closeDrawer: () => drawers.closeDrawer(),
-    toggleReportExpanded: rawDeps.toggleReportExpanded
+    toggleReportExpanded: rawDeps.toggleReportExpanded,
+    toggleReqExpanded: rawDeps.toggleReqExpanded
   };
 
   // 全局键盘快捷键：Ctrl+Z 撤销，Ctrl+Shift+Z / Ctrl+Y 重做（在 toolbar.js 中绑定），
@@ -145,6 +149,7 @@ export function bindAll(rawDeps) {
     reslib,
     workFilter,
     versionPage,
+    reqPage,
     themePicker,
     setSync,
     loading: { showLoading: () => showLoading(doc), hideLoading: () => hideLoading(doc) },

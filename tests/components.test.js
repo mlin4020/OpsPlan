@@ -11,6 +11,7 @@ import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { bindDrawers, paintModHover, pickDragHandle } from '../src/components/drawers.js';
 import { isPanTarget } from '../src/components/drag.js';
+import { bindReqPage } from '../src/components/req-page.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMP = resolve(ROOT, 'src/components');
@@ -244,5 +245,58 @@ describe('components: 抽屉与甘特交互的拆分契约', () => {
     };
     files.forEach(dfs);
     expect(cycles).toEqual([]);
+  });
+});
+
+// 最小 DOM 替身：只在 #gantt 上记录监听器，供断言"委托绑在哪、绑了什么"
+function fakeReqGantt() {
+  const handlers = {};
+  return {
+    handlers,
+    addEventListener: (type, fn) => { (handlers[type] = handlers[type] || []).push(fn); },
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+}
+
+function reqPageDeps() {
+  const gantt = fakeReqGantt();
+  const viewState = {
+    reqFilter: { kw: '', status: 'all', pri: 'all', ver: 'all', scope: 'all', unscheduled: 'all' },
+    reqSort: { key: 'order', dir: 'asc' }
+  };
+  let rendered = 0;
+  return {
+    gantt, viewState,
+    rendered: () => rendered,
+    render: () => { rendered++; },
+    toast: () => {},
+    planStore: { state: { modules: [{ name: 'A', bars: [] }] } },
+    sched: { updateModule: () => {}, archiveModule: () => {}, deleteModule: () => {} },
+    getEl: () => null
+  };
+}
+
+describe('req-page: 台账事件委托', () => {
+  it('把 click / input / change 委托绑在 #gantt 上，各只绑一次', () => {
+    const deps = reqPageDeps();
+    bindReqPage(deps);
+    expect(deps.gantt.handlers.click.length).toBe(1);
+    expect(deps.gantt.handlers.input.length).toBe(1);
+    expect(deps.gantt.handlers.change.length).toBe(1);
+  });
+
+  it('容器或 viewState 缺失时安全返回 null，不抛错', () => {
+    expect(bindReqPage({ viewState: {} })).toBe(null);
+    expect(bindReqPage({ gantt: fakeReqGantt() })).toBe(null);
+  });
+
+  it('viewState 没带 reqFilter/reqSort 时自动补默认值（两个入口不必各自记得加）', () => {
+    const deps = reqPageDeps();
+    delete deps.viewState.reqFilter;
+    delete deps.viewState.reqSort;
+    bindReqPage(deps);
+    expect(deps.viewState.reqFilter.scope).toBe('all');
+    expect(deps.viewState.reqSort.key).toBe('order');
   });
 });
