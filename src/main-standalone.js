@@ -17,11 +17,13 @@ import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays } from './core/default-data.js';
 import { defaultWorkFilter } from './core/work-filter.js';
+import { defaultReqFilter, defaultReqSort } from './core/mod-query.js';
 import { createScheduler } from './scheduler/index.js';
 import { buildViewerShellHTML } from './components/shell.js';
 import { bindWorkFilter } from './components/work-filter.js';
 import { bindVersionPage } from './components/version-page.js';
-import { renderAll } from './views/index.js';
+import { bindReqPage } from './components/req-page.js';
+import { renderAll, toggleReqExpanded } from './views/index.js';
 import { restoreTheme } from './utils/theme.js';
 
 const ZOOM_DAYW = { day: 13, week: 15, month: 32 };
@@ -50,8 +52,13 @@ function boot() {
   // 注意：必须先读取注入数据（#plan-data script），
   // 再重建 body——innerHTML 替换会销毁原有 script 元素。
   const params = new URLSearchParams(location.search);
-  // 白名单与主壳保持一致（含 work / arch / version），未知值回退默认视图
-  const viewFromQuery = ['res', 'report', 'mod', 'arch', 'work', 'version'].includes(params.get('view')) ? params.get('view') : 'mod';
+  // 白名单与主壳保持一致（含 req / work / version），未知值回退默认视图
+  // 旧链接兼容：归档页已被需求台账取代，老书签 ?view=arch 重定向到 req
+  const VIEW_ALIAS = { arch: 'req' };
+  const rawView = params.get('view') || '';
+  const viewFromQuery = ['res', 'report', 'mod', 'req', 'work', 'version'].includes(VIEW_ALIAS[rawView] || rawView)
+    ? (VIEW_ALIAS[rawView] || rawView)
+    : 'mod';
   const injected = readInjectedPlan();
 
   // 只读查看器同样跟随已选配色（file:// 下 localStorage 不可用时静默降级为默认色）
@@ -93,7 +100,10 @@ function boot() {
   // ?me=某人：资源工作视图的"看自己"深链，与排期页同一套口径（导出件发给个人时尤其好用）
   const viewState = {
     view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: ZOOM_DAYW.day,
-    workFilter: { ...defaultWorkFilter(), person: (params.get('me') || '').trim() }
+    workFilter: { ...defaultWorkFilter(), person: (params.get('me') || '').trim() },
+    // 需求台账的筛选与排序（查看器里同样可筛可排，只是不能改数据）
+    reqFilter: defaultReqFilter(),
+    reqSort: defaultReqSort()
   };
   const baseCtx = {
     state: planStore.state,
@@ -113,6 +123,8 @@ function boot() {
       dayW: viewState.dayW,
       collapsed: viewState.collapsed,
       workFilter: viewState.workFilter,
+      reqFilter: viewState.reqFilter,
+      reqSort: viewState.reqSort,
       // 未显式指定时保持 undefined：renderAll 会沿用当前滚动位置（传 0 会被当作"滚到最左"）
       scrollLeft: typeof sc === 'number' ? sc : undefined
     };
@@ -133,6 +145,9 @@ function boot() {
     today: () => new Date(),
     render
   });
+  // 需求台账：查看器里同样要能展开档案 / 排序 / 筛选（领导看的就是这个）。
+  // isReadonly 固定 true：查看器全只读，写操作拦在最前面（按钮另有 CSS 隐藏，这是第二道防线）
+  bindReqPage({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, toggleReqExpanded, isReadonly: () => true });
 
   // ---- 工具栏：视图切换 + 缩放（日/周/月 + 滑块） ----
   const syncViewBtns = () => document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === viewState.view));
@@ -143,7 +158,7 @@ function boot() {
     const v = viewState.view;
     document.body.classList.toggle('report-view', v === 'report');
     document.body.classList.toggle('work-view', v === 'work');
-    document.body.classList.toggle('arch-view', v === 'arch');
+    document.body.classList.toggle('req-view', v === 'req');
     document.body.classList.toggle('version-view', v === 'version');
   };
   const applyZoom = dw => {

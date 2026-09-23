@@ -168,16 +168,17 @@ describe('移动端：抽屉可关闭', () => {
     expect(modals).toMatch(/updateModule\(\{[^}]*pri: readModPri\(deps\)/);
   });
 
-  it('归档视图收敛工具栏：隐去排期操作按钮，但保留 hero 统计', () => {
+  it('需求台账收敛工具栏：隐去排期操作按钮，但保留 hero 统计', () => {
     const toolbar = readFileSync(resolve(ROOT, 'src/components/toolbar.js'), 'utf8');
-    // 归档页与总览一样在 body 上打标记（但与之区分：归档页要保留 hero 统计）
-    expect(toolbar).toMatch(/classList\.toggle\('arch-view', v === 'arch'\)/);
-    expect(css).toMatch(/body\.arch-view \[data-report-hide\]:not\(\.stats\)\{display:none\}/);
-    expect(css).toMatch(/body\.arch-view \.msheet-item\[data-zoom-only\]\{display:none\}/);
-    // 归档页没有时间轴，缩放对它无意义（且不该劫持 Ctrl+滚轮）
+    // 台账与总览一样在 body 上打标记（但与之区分：台账要保留 hero 统计 ——
+    // 它没有自己的指标条，顶栏藏了顶上就空了）
+    expect(toolbar).toMatch(/classList\.toggle\('req-view', v === 'req'\)/);
+    expect(css).toMatch(/body\.req-view \[data-report-hide\]:not\(\.stats\)\{display:none\}/);
+    expect(css).toMatch(/body\.req-view \.msheet-item\[data-zoom-only\]\{display:none\}/);
+    // 台账没有时间轴，缩放对它无意义（且不该劫持 Ctrl+滚轮）
     // —— 资源工作视图（work）/ 版本页（version）同属非时间轴视图，一并排除，
     //    故这条断言的钉死文本随之扩展
-    expect(toolbar).toMatch(/return v !== 'report' && v !== 'arch' && v !== 'work' && v !== 'version';/);
+    expect(toolbar).toMatch(/return v !== 'report' && v !== 'req' && v !== 'work' && v !== 'version';/);
     // 版本（迭代）页按同一套「整页文档」口径收敛工具栏，且不提供缩放项
     expect(toolbar).toMatch(/classList\.toggle\('version-view', v === 'version'\)/);
     expect(css).toMatch(/body\.version-view \[data-report-hide\]\{display:none\}/);
@@ -367,18 +368,65 @@ describe('工具栏：分段控件与按钮质感', () => {
     expect(modView).toMatch(/\|\| '#94a3b8'/);
   });
 
-  it('归档入口的数量徽标用中性灰，不占用「问题 / 逾期」的红色语义', () => {
+  it('需求台账入口不挂徽标（主视图不需要提醒数字）', () => {
     const html = buildShellHTML();
-    // 红色在本项目专指"有问题/逾期"（排期问题徽标、逾期数字）；归档只是计数，
-    // 红点会让人以为归档里出了状况。桌面工具栏 ×2 + 移动端底部导航 ×1 都挂中性类。
-    expect(html).toContain('class="badge badge-neutral" id="archNavCount"');
-    expect(html).toContain('class="badge mnav-badge badge-neutral" id="archNavCountM"');
-    // 导出单文件（只读查看器）里的归档入口同样是中性色
-    expect(buildViewerShellHTML()).toContain('class="badge badge-neutral" id="archNavCount"');
-    expect(css).toMatch(/\.badge-neutral\{background:var\(--slate\)\}/);
-    // 默认徽标仍是红，问题徽标不得被改成中性色
+    // 导航徽标在本项目里的语义是"有 N 个容易被遗忘的东西"（原先只有归档带，正因它埋在页底）；
+    // 台账是主视图，不会有被遗忘的问题 —— 需求总数改为在页面标题区展示。
+    expect(html).not.toContain('archNavCount');
+    expect(html).not.toContain('reqNavCount');
+    // 导出单文件（只读查看器）里的台账入口同样不带徽标
+    expect(buildViewerShellHTML()).not.toContain('archNavCount');
+    expect(buildViewerShellHTML()).not.toContain('reqNavCount');
+    // 默认徽标仍是红，问题徽标不受影响
     expect(css).toMatch(/\.badge\{[^}]*background:var\(--red\)/);
     expect(html).toMatch(/class="badge" id="probCount"/);
+  });
+});
+
+describe('需求台账：导航与视图接入', () => {
+  const shell = readFileSync(resolve(ROOT, 'src/components/shell.js'), 'utf8');
+  const toolbar = readFileSync(resolve(ROOT, 'src/components/toolbar.js'), 'utf8');
+  const viewsIndex = readFileSync(resolve(ROOT, 'src/views/index.js'), 'utf8');
+  const mainGantt = readFileSync(resolve(ROOT, 'src/main-gantt.js'), 'utf8');
+  const mainStandalone = readFileSync(resolve(ROOT, 'src/main-standalone.js'), 'utf8');
+
+  it('三处导航都有需求台账，且处处紧跟总览之后', () => {
+    expect((shell.match(/data-view="req"/g) || []).length).toBe(3);
+    expect((shell.match(/需求台账/g) || []).length).toBeGreaterThanOrEqual(3);
+    // 归档入口已不存在
+    expect(shell).not.toContain('data-view="arch"');
+    // 移动端底栏 / 桌面工具栏 / 查看器壳：都是「总览 → 需求台账」
+    expect((shell.match(/data-view="report"[\s\S]{0,200}?data-view="req"/g) || []).length).toBe(3);
+  });
+
+  it('工具栏按 req-view 收敛并排除缩放', () => {
+    expect(toolbar).toMatch(/classList\.toggle\('req-view', v === 'req'\)/);
+    expect(toolbar).toMatch(/return v !== 'report' && v !== 'req' && v !== 'work' && v !== 'version';/);
+    expect(toolbar).not.toContain('arch-view');
+  });
+
+  it('视图分发把 req 交给整页文档模式，且不再引用归档页', () => {
+    expect(viewsIndex).toMatch(/view === 'req' \|\| view === 'work' \|\| view === 'version'/);
+    expect(viewsIndex).toContain('renderReqView');
+    expect(viewsIndex).not.toContain('archive-view');
+  });
+
+  it('两个入口都接入台账：白名单、旧链接别名、筛选态、展开态', () => {
+    [mainGantt, mainStandalone].forEach(src => {
+      expect(src).toMatch(/'req'/);            // 视图白名单
+      expect(src).toMatch(/arch:\s*'req'/);    // 旧链接 ?view=arch → req
+      expect(src).toMatch(/reqFilter/);
+      expect(src).toMatch(/reqSort/);
+    });
+    expect(mainGantt).toMatch(/toggleReqExpanded/);
+    expect(mainStandalone).toMatch(/bindReqPage\(/);
+    expect(mainStandalone).toMatch(/isReadonly: \(\) => true/);
+  });
+
+  it('CSS 里归档页的 body class 已全部改名', () => {
+    expect(css).not.toContain('arch-view');
+    expect(css).toContain('body.req-view [data-report-hide]:not(.stats)');
+    expect(css).toContain('body.req-view .msheet-item[data-zoom-only]');
   });
 });
 

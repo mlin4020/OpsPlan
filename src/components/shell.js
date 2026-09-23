@@ -27,7 +27,8 @@ const MI = {
   // 工作视图：清单图标（勾选 + 三行）—— 与 res 的人形图标刻意区分：
   // res 是"按时间轴看人"，work 是"按清单看活"
   work: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.8 6.2 4.4 7.8l2.6-2.9"/><path d="M2.8 12.4 4.4 14l2.6-2.9"/><path d="M2.8 18.6 4.4 20.2l2.6-2.9"/><path d="M11.2 6.6h10"/><path d="M11.2 13h10"/><path d="M11.2 19.4h10"/></svg>',
-  arch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4.2" rx="1.6"/><path d="M4.6 8.2v10.2a1.6 1.6 0 0 0 1.6 1.6h11.6a1.6 1.6 0 0 0 1.6-1.6V8.2"/><path d="M9.6 12.6h4.8"/></svg>',
+  // 需求台账：表格 / 清单图标（台账是清单，不再是档案箱）
+  req: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.2" width="18" height="15.6" rx="2.2"/><path d="M3 9.4h18"/><path d="M9.4 9.4v10.4"/></svg>',
   // 版本（迭代）：吊牌图标 —— 与 arch 的"箱子"刻意区分（一个是收口留档，一个是待发车）
   version: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.4 12.6 12.6 3.4h5.4a2.6 2.6 0 0 1 2.6 2.6v5.4l-9.2 9.2a1.7 1.7 0 0 1-2.4 0l-5.6-5.6a1.7 1.7 0 0 1 0-2.4z"/><circle cx="15.4" cy="8.6" r="1.35"/></svg>',
   more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5.2" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="18.8" cy="12" r="1.7"/></svg>',
@@ -44,10 +45,10 @@ function mobileNavHTML(withMore) {
     : `<button class="mnav-item" id="mMore" type="button" aria-haspopup="dialog">${MI.more}<span>更多</span></button>`;
   return `<nav class="mnav" id="mnav" aria-label="视图切换">
   <button class="mnav-item" data-view="report">${MI.report}<span>总览</span></button>
+  <button class="mnav-item" data-view="req">${MI.req}<span>需求台账</span></button>
   <button class="mnav-item" data-view="mod">${MI.mod}<span>甘特图</span></button>
   <button class="mnav-item" data-view="res">${MI.res}<span>规划器</span></button>
   <button class="mnav-item" data-view="work">${MI.work}<span>工作视图</span></button>
-  <button class="mnav-item" data-view="arch">${MI.arch}<span>归档</span><span class="badge mnav-badge badge-neutral" id="archNavCountM" hidden>0</span></button>
   <button class="mnav-item" data-view="version">${MI.version}<span>版本</span></button>${more}
 </nav>`;
 }
@@ -98,10 +99,10 @@ export function buildViewerShellHTML() {
 <div class="toolbar" id="toolbar">
   <div class="view-nav" id="viewNav">
     <button class="btn" data-view="report">总览</button>
+    <button class="btn" data-view="req" title="全部需求清单：可排序筛选，点行展开需求档案">需求台账</button>
     <button class="btn" data-view="mod">甘特图</button>
     <button class="btn" data-view="res">工作组规划器</button>
     <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
-    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
     <button class="btn" data-view="version" title="版本（迭代）：给一组需求一个统一上线日，一起上线">版本</button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>
@@ -147,10 +148,10 @@ export function buildShellHTML() {
 <div class="toolbar toolbar-full" id="toolbar">
   <div class="view-nav" id="viewNav">
     <button class="btn" data-view="report">总览</button>
+    <button class="btn" data-view="req" title="全部需求清单：可排序筛选，点行展开需求档案">需求台账</button>
     <button class="btn" data-view="mod">甘特图</button>
     <button class="btn" data-view="res">工作组规划器</button>
     <button class="btn" data-view="work" title="资源工作视图：按人查看每个人手里的任务、优先级与状态">资源工作视图</button>
-    <button class="btn" data-view="arch" title="已归档需求（不参与排期展示）">归档<span class="badge badge-neutral" id="archNavCount" hidden>0</span></button>
     <button class="btn" data-view="version" title="版本（迭代）：给一组需求一个统一上线日，一起上线">版本</button>
   </div>
   <div class="tgroup tseg" data-report-hide><span class="gl">缩放</span>

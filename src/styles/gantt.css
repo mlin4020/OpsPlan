@@ -343,9 +343,9 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 body.report-view [data-report-hide]{display:none}
 /* 资源工作视图与总览一样自带指标条，hero 统计重复 —— 整块收敛（不像归档页那样 :not(.stats)） */
 body.work-view [data-report-hide]{display:none}
-/* 归档页同样收敛工具栏（只留视图切换 + 服务器组），但保留 hero 统计：
-   归档页没有自己的指标条，把统计也藏了顶栏就空了。 */
-body.arch-view [data-report-hide]:not(.stats){display:none}
+/* 需求台账页同样收敛工具栏（只留视图切换 + 服务器组），但保留 hero 统计：
+   台账页没有自己的指标条，把统计也藏了顶栏就空了。 */
+body.req-view [data-report-hide]:not(.stats){display:none}
 .gantt.report-mode{background:linear-gradient(180deg,#eef2f8,#f5f7fa 40%);padding:14px 18px 28px;min-height:100%;overflow-y:auto}
 .report-wrap{max-width:1300px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 .report-sec{background:#fff;border-radius:12px;padding:14px 18px;box-shadow:0 1px 2px #0f172a0d,0 6px 18px #0f172a0d;border:1px solid rgba(226,232,240,.7)}
@@ -665,7 +665,7 @@ body.msheet-open .mnav-item#mMore{color:var(--blue);background:var(--accent-soft
 .msheet-item[data-server-only]{display:none}
 body.with-server .msheet-item[data-server-only]{display:flex}
 body.report-view .msheet-item[data-zoom-only]{display:none}
-body.arch-view .msheet-item[data-zoom-only]{display:none}
+body.req-view .msheet-item[data-zoom-only]{display:none}
 body.work-view .msheet-item[data-zoom-only]{display:none}
 .msheet-cancel{margin-top:10px;min-height:48px;border-radius:12px;border:none;background:#f1f5f9;color:#475569;font-size:13px;font-weight:800;font-family:inherit;cursor:pointer}
 .toolbar.toolbar-full,.view-nav{display:none}

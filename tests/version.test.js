@@ -466,7 +466,7 @@ describe('版本：界面接入契约（新增视图要同步的注册点）', (
     const fs = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const src = fs.readFileSync(fileURLToPath(new URL('../src/views/index.js', import.meta.url)), 'utf8');
-    expect(src).toMatch(/view === 'arch' \|\| view === 'work' \|\| view === 'version'/);
+    expect(src).toMatch(/view === 'req' \|\| view === 'work' \|\| view === 'version'/);
     expect(src).toMatch(/renderVersionView\(gantt, full\)/);
   });
 });
