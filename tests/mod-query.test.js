@@ -1,7 +1,7 @@
 // 需求台账的筛选与排序：纯函数，不依赖 DOM
 import { describe, it, expect } from 'vitest';
 import { F } from '../src/core/dates.js';
-import { filterMods, sortMods } from '../src/core/mod-query.js';
+import { filterMods, sortMods, collectProposers, defaultReqFilter } from '../src/core/mod-query.js';
 
 const today = F('2026-08-20');
 
@@ -151,5 +151,78 @@ describe('mod-query: sortMods 排序', () => {
   it('未知 key 视为 order', () => {
     expect(names(sortMods(makeMods(), 'nope', 'asc', deps)))
       .toEqual(['官网改版', '数据看板', '移动端适配']);
+  });
+});
+
+describe('mod-query: collectProposers 提出人候选', () => {
+  it('去重、忽略空值与首尾空格、保持首次出现顺序', () => {
+    const mods = [
+      { name: 'a', proposedBy: '张三' },
+      { name: 'b', proposedBy: ' 李四 ' },
+      { name: 'c' },
+      { name: 'd', proposedBy: '   ' },
+      { name: 'e', proposedBy: '张三' },
+      { name: 'f', proposedBy: '王五' }
+    ];
+    expect(collectProposers(mods)).toEqual(['张三', '李四', '王五']);
+  });
+
+  it('空数组与非法入参返回空数组', () => {
+    expect(collectProposers([])).toEqual([]);
+    expect(collectProposers(null)).toEqual([]);
+  });
+});
+
+describe('mod-query: 生命周期筛选与提出人关键词', () => {
+  const mods = [
+    { name: 'A', lifecycle: '已确认', proposedBy: '张三', bars: [] },
+    { name: 'B', lifecycle: '待确认', proposedBy: '李四', bars: [] },
+    { name: 'C', bars: [] }
+  ];
+
+  it('默认 filter 带 lifecycle:all（三处入口共用同一份默认值）', () => {
+    expect(defaultReqFilter().lifecycle).toBe('all');
+  });
+
+  it('按生命周期筛选，none 表示未设置', () => {
+    expect(names(filterMods(mods, { lifecycle: '已确认' }, deps))).toEqual(['A']);
+    expect(names(filterMods(mods, { lifecycle: 'none' }, deps))).toEqual(['C']);
+    expect(names(filterMods(mods, {}, deps))).toEqual(['A', 'B', 'C']);
+  });
+
+  it('关键词命中提出人（搜"某人提的需求"）', () => {
+    expect(names(filterMods(mods, { kw: '李四' }, deps))).toEqual(['B']);
+  });
+});
+
+describe('mod-query: 新增排序键（提出时间 / 生命周期 / 确认时间）', () => {
+  it('按提出时间排序，未填写的排最后', () => {
+    const mods = [
+      { name: 'A', proposedAt: '2026-08-20', bars: [] },
+      { name: 'B', bars: [] },
+      { name: 'C', proposedAt: '2026-08-01', bars: [] }
+    ];
+    expect(names(sortMods(mods, 'proposed', 'asc', deps))).toEqual(['C', 'A', 'B']);
+    expect(names(sortMods(mods, 'proposed', 'desc', deps))).toEqual(['A', 'C', 'B']);
+  });
+
+  it('按生命周期排序（枚举序），未设置排最后', () => {
+    const mods = [
+      { name: 'A', lifecycle: '已上线', bars: [] },
+      { name: 'B', bars: [] },
+      { name: 'C', lifecycle: '待确认', bars: [] }
+    ];
+    expect(names(sortMods(mods, 'lifecycle', 'asc', deps))).toEqual(['C', 'A', 'B']);
+    expect(names(sortMods(mods, 'lifecycle', 'desc', deps))).toEqual(['A', 'C', 'B']);
+  });
+
+  it('按需求确认时间排序，没有确认里程碑的排最后', () => {
+    const mods = [
+      { name: 'A', bars: [{ id: 'x', m: '2026-08-05', p: 'cfm', label: '需求确认' }] },
+      { name: 'B', bars: [] },
+      { name: 'C', bars: [{ id: 'y', m: '2026-08-11', label: '需求确认' }] }
+    ];
+    expect(names(sortMods(mods, 'confirm', 'asc', deps))).toEqual(['A', 'C', 'B']);
+    expect(names(sortMods(mods, 'confirm', 'desc', deps))).toEqual(['C', 'A', 'B']);
   });
 });
