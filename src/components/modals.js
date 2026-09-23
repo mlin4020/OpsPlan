@@ -7,7 +7,7 @@
 // 依赖注入（deps）：sched/planStore/render/toast/getEl/（新增需求需 deps.viewState.collapsed 写折叠态）
 // 只读：可编辑守卫在 SCHED 内（addModule 抛错），此处 UI 由工具栏 disabled 禁用
 // ============================================================
-import { moduleTag, computeModulePer } from '../core/mod-tag.js';
+import { moduleTag } from '../core/mod-tag.js';
 import { nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-color.js';
 import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
 
@@ -66,7 +66,6 @@ function openNewModModal(deps) {
   // 任务条也就失去区分作用
   g('newModTagc').value = nextModuleColor(deps.planStore.state.modules);
   refreshModColorTip(deps);
-  g('newModPer').value = '';
   g('newModDesc').value = '';
   g('newModDocUrl').value = '';
   renderModSchedSeg(false, deps);   // 默认「已排期」
@@ -85,7 +84,6 @@ function openEditModModal(modName, deps) {
   modEditName = modName;
   const g = deps.getEl;
   const { tag: autoTag, tagc: autoTagc } = moduleTag(mo, typeof deps.today === 'function' ? deps.today() : (deps.today || new Date()));
-  const autoPer = computeModulePer(mo.bars || [], deps.planStore.state.resources);
   // 兜底色取该需求当前实际生效的识别色（与任务条色条一致），而非状态标签色
   const modColors = resolveModuleColors(deps.planStore.state.modules);
   g('modModalTitle').textContent = '编辑需求';
@@ -95,7 +93,6 @@ function openEditModModal(modName, deps) {
   // 回显原始 tagc 会让弹窗与图上的条色 / 色点对不上（历史数据里 tagc 默认全是同一个蓝）
   g('newModTagc').value = modColors[mo.name] || mo.tagc || autoTagc;
   refreshModColorTip(deps);
-  g('newModPer').value = mo.per || autoPer;
   g('newModDesc').value = mo.desc || '';
   g('newModDocUrl').value = mo.docUrl || '';
   renderModSchedSeg(!!mo.unscheduled, deps);
@@ -206,7 +203,7 @@ function bindModalControls(deps) {
       }
       try {
         // tagc 落「实际生效色」：与去重逻辑、后续弹窗回显保持同一口径
-        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), per: g('newModPer').value.trim(), unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
+        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
         const collapsed = deps.viewState.collapsed;
         collapsed[name] = collapsed[modEditName];
         if (name !== modEditName) delete collapsed[modEditName];
@@ -219,7 +216,7 @@ function bindModalControls(deps) {
       if (deps.planStore.state.modules.some(m => m.name === name)) { deps.toast('需求已存在：' + name); return; }
       const phases = selectedPhases(deps);
       if (phases === null) { deps.toast('请至少选择一个要初始化的阶段'); return; }
-      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), per: g('newModPer').value.trim(), phases, unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
+      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
       closeNewModModal(deps);
       deps.viewState.collapsed[name] = false;
       deps.render();

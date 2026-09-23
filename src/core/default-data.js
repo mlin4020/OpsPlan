@@ -41,7 +41,7 @@ const RESOURCES = [
 
 // 默认需求排期数据（结构见 gantt-data.js 注释说明）
 const MODULES = [
- { name:"官网改版", tag:"冲刺中", tagc:"#ef4444", per:"全栈", pri:"P0", bars:[
+ { name:"官网改版", tag:"冲刺中", tagc:"#ef4444", pri:"P0", bars:[
    { id:"m1-req", s:"2026-08-26", e:"2026-08-28", p:"req", w:3,   done:100, res:["张三"], dep:[], manual:false, ignore:false },
    { id:"m1-ui",  s:"2026-08-26", e:"2026-08-28", p:"ui",  w:3,   done:100, res:["王五"], dep:[], manual:false, ignore:false },
    { id:"m1-cfm", s:"2026-08-31", e:"2026-08-31", p:"cfm", w:1,   done:100, res:["钱七"], dep:[{id:"m1-ui",lag:0}], manual:false, ignore:false },
@@ -50,7 +50,7 @@ const MODULES = [
    { id:"m1-uat", s:"2026-09-08", e:"2026-09-08", p:"uat", w:1,          res:["吴十"], dep:[{id:"m1-sit",lag:0}], manual:false, ignore:false },
    { m:"2026-09-09", label:"9/9 上线" }
  ]},
- { name:"数据看板", tag:"优先启动", tagc:"#f59e0b", per:"需求1+UI1", pri:"P1", bars:[
+ { name:"数据看板", tag:"优先启动", tagc:"#f59e0b", pri:"P1", bars:[
    { id:"m2-req", s:"2026-09-03", e:"2026-09-07", p:"req", w:5,   res:["张三"], dep:[], manual:false, ignore:false },
    { id:"m2-ui",  s:"2026-09-03", e:"2026-09-07", p:"ui",  w:5,   res:["王五"], dep:[], manual:false, ignore:false },
    { id:"m2-cfm", s:"2026-09-08", e:"2026-09-08", p:"cfm", w:1,   res:["张三"], dep:[{id:"m2-req",lag:0}], manual:false, ignore:false },
@@ -59,7 +59,7 @@ const MODULES = [
    { id:"m2-uat", s:"2026-10-14", e:"2026-10-14", p:"uat", w:1,   res:["吴十"], dep:[{id:"m2-sit",lag:0}], manual:false, ignore:false },
    { m:"2026-10-23", label:"10/23 上线" }
  ]},
- { name:"移动端适配", tag:"开发优先", tagc:"#3b82f6", per:"需求2+UI1", pri:"P2", bars:[
+ { name:"移动端适配", tag:"开发优先", tagc:"#3b82f6", pri:"P2", bars:[
    { id:"m3-req", s:"2026-09-03", e:"2026-09-07", p:"req", w:5,   res:["李四"], dep:[], manual:false, ignore:false },
    { id:"m3-ui",  s:"2026-09-08", e:"2026-09-11", p:"ui",  w:4,   res:["赵六"], dep:[{id:"m3-req",lag:0}], manual:false, ignore:false },
    { id:"m3-cfm", s:"2026-09-14", e:"2026-09-14", p:"cfm", w:1,   res:["李四"], dep:[{id:"m3-ui",lag:0}], manual:false, ignore:false },
@@ -68,7 +68,7 @@ const MODULES = [
    { id:"m3-uat", s:"2026-09-30", e:"2026-09-30", p:"uat", w:1,   res:["吴十"], dep:[{id:"m3-sit",lag:0}], manual:false, ignore:false },
    { m:"2026-10-01", label:"10/1 上线" }
  ]},
- { name:"权限中心", tag:"顺延", tagc:"#8b5cf6", per:"需求+UI", pri:"P3", bars:[
+ { name:"权限中心", tag:"顺延", tagc:"#8b5cf6", pri:"P3", bars:[
    { id:"m4-req", s:"2026-09-09", e:"2026-09-11", p:"req", w:3,   res:["张三"], dep:[], manual:false, ignore:false },
    { id:"m4-ui",  s:"2026-09-14", e:"2026-09-15", p:"ui",  w:2,   res:["王五"], dep:[{id:"m4-req",lag:0}], manual:false, ignore:false },
    { id:"m4-cfm", s:"2026-09-16", e:"2026-09-16", p:"cfm", w:1,   res:["张三"], dep:[{id:"m4-ui",lag:0}], manual:false, ignore:false },
@@ -77,7 +77,7 @@ const MODULES = [
    { id:"m4-uat", s:"2026-10-28", e:"2026-10-28", p:"uat", w:1,   res:["吴十"], dep:[{id:"m4-sit",lag:0}], manual:false, ignore:false },
    { m:"2026-10-29", label:"10/29 上线" }
  ]},
- { name:"性能优化", tag:"顺延", tagc:"#10b981", per:"需求+UI", bars:[
+ { name:"性能优化", tag:"顺延", tagc:"#10b981", bars:[
    { id:"m5-req", s:"2026-09-16", e:"2026-09-22", p:"req", w:7,   res:["李四"], dep:[], manual:false, ignore:false },
    { id:"m5-ui",  s:"2026-09-23", e:"2026-09-24", p:"ui",  w:2,   res:["赵六"], dep:[{id:"m5-req",lag:0}], manual:false, ignore:false },
    { id:"m5-cfm", s:"2026-09-25", e:"2026-09-25", p:"cfm", w:1,   res:["李四"], dep:[{id:"m5-ui",lag:0}], manual:false, ignore:false },
@@ -86,7 +86,7 @@ const MODULES = [
    { id:"m5-uat", s:"2026-11-06", e:"2026-11-06", p:"uat", w:1,   res:["吴十"], dep:[{id:"m5-sit",lag:0}], manual:false, ignore:false },
    { m:"2026-11-10", label:"11/10 上线" }
  ]},
- { name:"回归验证", tag:"收官", tagc:"#64748b", per:"全员", bars:[
+ { name:"回归验证", tag:"收官", tagc:"#64748b", bars:[
    { id:"m6-reg", s:"2026-11-11", e:"2026-11-12", p:"reg", w:2,
      res:["张三","李四","王五","赵六","钱七","孙八","周九","吴十"],
      dep:[{id:"m1-uat",lag:1},{id:"m2-uat",lag:1},{id:"m3-uat",lag:1},{id:"m4-uat",lag:1},{id:"m5-uat",lag:1}],

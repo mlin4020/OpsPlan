@@ -68,7 +68,6 @@ function modToReqFields(mo, order) {
       '需求名称': mo.name,
       '状态标签': mo.tag || '',
       '标签颜色': mo.tagc || '',
-      '人员配置': mo.per || '',
       '优先级': mo.pri || null,
       '排序号': order,
       '待排期': !!mo.unscheduled,
@@ -188,7 +187,6 @@ export async function loadPlanFromFeishu(projectRecordId) {
         name,
         tag: cellText(f['状态标签']),
         tagc: cellText(f['标签颜色']),
-        per: cellText(f['人员配置']),
         pri: cellText(f['优先级']) || null,
         bars: barsByReqName[name] || [],
       };

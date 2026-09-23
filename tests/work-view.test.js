@@ -190,7 +190,7 @@ describe('renderWorkView: 按人汇总的任务清单', () => {
   it('同一人内排序：逾期 → 进行中 → 未开始 → 已完成', () => {
     const ctx = makeCtx({ today: F('2026-08-20') });
     ctx.state.modules = [{
-      name: '排序样例', tag: '冲刺中', tagc: '#ef4444', per: '需求', pri: 'P1',
+      name: '排序样例', tag: '冲刺中', tagc: '#ef4444', pri: 'P1',
       bars: [
         { id: 'a', s: '2026-09-20', e: '2026-09-25', p: 'dev', w: 4, done: 0, res: ['张三'], dep: [], manual: false, ignore: false },
         { id: 'b', s: '2026-08-01', e: '2026-08-05', p: 'req', w: 3, done: 40, res: ['张三'], dep: [], manual: false, ignore: false },
@@ -230,13 +230,13 @@ function filterCtx(filter) {
     ],
     modules: [
       {
-        name: '官网改版', tag: '冲刺中', tagc: '#ef4444', per: '全栈', pri: 'P0', bars: [
+        name: '官网改版', tag: '冲刺中', tagc: '#ef4444', pri: 'P0', bars: [
           { id: 'a1', s: '2026-08-01', e: '2026-08-05', p: 'dev', w: 5, done: 40, res: ['张三'], dep: [], manual: false, ignore: false },
           { id: 'a2', s: '2026-09-20', e: '2026-09-25', p: 'ui', w: 4, done: 0, res: ['李四'], dep: [], manual: false, ignore: false }
         ]
       },
       {
-        name: '数据看板', tag: '待启动', tagc: '#3b82f6', per: '开发', pri: 'P1', bars: [
+        name: '数据看板', tag: '待启动', tagc: '#3b82f6', pri: 'P1', bars: [
           { id: 'b1', s: '2026-08-10', e: '2026-08-12', p: 'dev', w: 3, done: 100, res: ['张三'], dep: [], manual: false, ignore: false },
           { id: 'b2', s: '2026-08-18', e: '2026-08-22', p: 'sit', w: 3, done: 0, res: [], dep: [], manual: false, ignore: false }
         ]

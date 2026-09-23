@@ -287,7 +287,6 @@ export function createMutations(ctx) {
       name,
       tag: (opts.tag || '').trim() || '待启动',
       tagc: opts.tagc || '#3b82f6',
-      per: (opts.per || '').trim() || '',
       // 优先级：新建时给默认值（未传或非法值都落到 PRIORITY_DEFAULT），
       // 历史数据没有该字段则保持 undefined = 未设置，不替用户补值
       pri: normalizePriority(opts.pri) || PRIORITY_DEFAULT,
@@ -362,7 +361,7 @@ export function createMutations(ctx) {
     return mo;
   }
 
-  // 修改需求信息：支持改名称/标签/颜色/人员配置
+  // 修改需求信息：支持改名称/标签/颜色/优先级/描述/需求文档
   // 改名时会同步更新该需求下全部任务条的 mod 引用（collect 写回），保证依赖索引一致
   function updateModule(opts) {
     if (!assertEditable()) return;
@@ -384,7 +383,6 @@ export function createMutations(ctx) {
     }
     if (opts.tag != null) mo.tag = (opts.tag || '').trim() || '待启动';
     if (opts.tagc != null) mo.tagc = opts.tagc || '#3b82f6';
-    if (opts.per != null) mo.per = (opts.per || '').trim() || '';
     // 优先级：传 null/'' 表示清除（回到「未设置」），传非法值按清除处理
     if (opts.pri != null || 'pri' in opts) mo.pri = normalizePriority(opts.pri);
     // 排期状态（人工）：true = 待排期。待排期需求不在总览展示排期，也不计入并行/逾期统计
@@ -402,7 +400,7 @@ export function createMutations(ctx) {
         }
       }
     }
-    // 描述与需求文档：传空串 = 清除（回到"未填写"），与 tag / per 的归一化口径一致
+    // 描述与需求文档：传空串 = 清除（回到"未填写"），与 tag 的归一化口径一致
     if ('desc' in opts) {
       const d = (opts.desc || '').trim();
       if (d) mo.desc = d; else delete mo.desc;

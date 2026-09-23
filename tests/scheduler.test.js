@@ -90,7 +90,7 @@ describe('scheduler: 需求与任务编辑', () => {
 
   it('addModule 新增需求 / 重复与空名拒绝 / 空需求不破坏 collect', () => {
     const sched = makeSched();
-    const mo = sched.addModule({ name: '测试需求', tag: '新建', tagc: '#8b5cf6', per: '需求1', autoCreate: false });
+    const mo = sched.addModule({ name: '测试需求', tag: '新建', tagc: '#8b5cf6', autoCreate: false });
     expect(!!mo && mo.name === '测试需求' && Array.isArray(mo.bars) && mo.bars.length === 0).toBe(true);
     expect(mods().some(m => m.name === '测试需求')).toBe(true);
     expect(() => sched.addModule({ name: '测试需求' })).toThrow();
