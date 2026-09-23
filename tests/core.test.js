@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { F, pad, fmt, addDays, diff, fmtD } from '../src/core/dates.js';
 import {
   PNAME, PCOL, PHASE_LIST,
+  MODULE_LIFECYCLE, LIFECYCLE_DEFAULT, LIFECYCLE_NONE, normalizeLifecycle,
   defaultModules, defaultResources, defaultHolidays
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
@@ -499,5 +500,21 @@ describe('core: modStats 需求级进度（人日口径）', () => {
     expect(r.pct).toBeCloseTo(45.45, 1);
     expect(r.planPct).toBeCloseTo(90.91, 1);
     expect(r.pct - r.planPct).toBeLessThan(0);
+  });
+});
+
+describe('core/default-data: 生命周期枚举与归一化', () => {
+  it('MODULE_LIFECYCLE 是四档，数组顺序即流程顺序', () => {
+    expect(MODULE_LIFECYCLE).toEqual(['待确认', '已确认', '已提测', '已上线']);
+    expect(LIFECYCLE_DEFAULT).toBe('待确认');
+    expect(LIFECYCLE_NONE).toBe('未设置');
+  });
+
+  it('normalizeLifecycle 只接受四档，其余一律 null', () => {
+    MODULE_LIFECYCLE.forEach(v => expect(normalizeLifecycle(v)).toBe(v));
+    // 带空格 / 大小写变体 / 不存在的档位 / 非字符串，一律视为未设置（不做 trim 兜底）
+    [undefined, null, '', ' 已上线', '已上线 ', '上线', '待确认中', 0, {}].forEach(
+      v => expect(normalizeLifecycle(v)).toBe(null)
+    );
   });
 });
