@@ -45,7 +45,7 @@ function memberRow(v, mo, ctx) {
   const { state, today, workday } = ctx;
   const { tag, tagc } = moduleTag(mo, today);
   const rng = versionRange({ mods: [mo.name], date: v.date }, state);
-  const pct = modStats(mo.bars, rng, ctx).pct;
+  const pct = modStats(mo.bars, ctx).pct;
   const late = modLate(v, mo);
   // 状态说明：待排期需求的日期不可信（不参与赶不上判定），单独标灰，别让它显示成"可按时"
   const flag = mo.unscheduled

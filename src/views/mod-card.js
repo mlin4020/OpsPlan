@@ -84,7 +84,7 @@ export function renderModCard(mo, ctx, opts = {}) {
   const rng = modRange(mo);
   const { tag: autoTag, tagc: autoTagc } = moduleTag(mo, today);
   const autoPer = computeModulePer(bars, state.resources);
-  const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, rng, ctx);
+  const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, ctx);
   const devi = Math.round((mp - planPct) * 10) / 10;
   const st = (!rng || !mWork) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
   const stTxt = st === 'late' ? `延后${Math.abs(devi).toFixed(0)}%` : (st === 'ahead' ? `超前${devi.toFixed(0)}%` : '');

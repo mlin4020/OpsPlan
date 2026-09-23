@@ -88,8 +88,10 @@ export function renderReportView(container, ctx) {
   // 需求工作量口径（排期总览 + 需求进度卡片共用，避免两处算法漂移）：
   //   work/done 只统计阶段任务，里程碑（b.m）不占工作量 —— 里程碑是时间点不是工作量，
   //   且「任务转里程碑」的记录会同时带 s/e 与 m，仅凭 s&&e 判断会把它误算进分母。
-  //   planPct 用时间口径（需求时间跨度已过比例，见 computePlanPct）：不做人日加权 ——
-  //   工作量在时间轴上分布不均匀，加权会把应达值顶高，与"是否按计划正常推进"的直觉背离。
+  //   planPct 用工作量口径（EVM 的 PV，见 computePlanPct）：按各任务的计划窗口算
+  //   "到今天为止按计划应完成的人日占比"，再与完成度 EV 相减得到偏差。
+  //   ⚠️ 不要退回"需求时间跨度已过比例"：那会把前重后轻的计划（末尾长空档）算成
+  //   进度领先 —— 一条有任务已逾期未完成的需求会被判成「超前」。
   const rowsHtml = mods.map(mo => {
     // 待排期需求：不画排期条与里程碑，只占一行显示「待排期」
     // （还没排期时日期与进度都不可信，画出来只会误导）
@@ -103,7 +105,7 @@ export function renderReportView(container, ctx) {
     const rng = modRange(mo);
     // 需求进度计算（复用需求进度卡片的逻辑）
     const bars = mo.bars || [];
-    const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, rng, ctx);
+    const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, ctx);
     const devi = Math.round((mp - planPct) * 10) / 10;                 // 偏差：实际完成 - 今日应达
     const st = (!rng || !mWork) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
     const stTxt = st === 'late' ? ` · 延后 ${Math.abs(devi).toFixed(0)}%` : (st === 'ahead' ? ` · 超前 ${devi.toFixed(0)}%` : '');
@@ -166,7 +168,7 @@ export function renderReportView(container, ctx) {
     }
     const bars = mo.bars || [];
     const rng = modRange(mo);
-    const { work: mWork, pct: mp, planPct } = modStats(bars, rng, ctx);
+    const { work: mWork, pct: mp, planPct } = modStats(bars, ctx);
     const devi = Math.round((mp - planPct) * 10) / 10;
     const st = (!rng || !mWork) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
     const stTxt = !rng || !mWork ? '未开始'

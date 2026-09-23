@@ -96,7 +96,13 @@ function rowHtml(mo, ctx) {
   const ship = shipInfo(mo, ctx);
   const ver = versionOfMod(ctx.state, mo.name);
   const rng = mo.unscheduled ? null : ctx.modRange(mo);
-  const st = modStats(mo.bars, rng, ctx);
+  const st = modStats(mo.bars, ctx);
+  // 偏差与总览卡片同口径（EV − PV，即"实际完成度 − 计划应达"）；
+  // 无排期需求不判偏差（日期本身不可信），进度条也就不变色
+  const devi = st.work ? Math.round((st.pct - st.planPct) * 10) / 10 : 0;
+  const stCls = (!rng || !st.work) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
+  const deviTxt = stCls === 'late' ? `延后 ${Math.abs(devi).toFixed(0)}%`
+    : (stCls === 'ahead' ? `超前 ${devi.toFixed(0)}%` : '');
   const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
 
   return `<tr class="req-row" data-req-row="${esc(mo.name)}">
@@ -107,8 +113,9 @@ function rowHtml(mo, ctx) {
     <td>${ver ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>` : '<span class="req-muted">未加入版本</span>'}</td>
     <td>${rng ? `<span class="req-sub">${fmtD(rng.start)}~${fmtD(rng.end)}</span>` : `<span class="req-muted">${mo.unscheduled ? '待排期' : '—'}</span>`}</td>
     <td class="req-c-pct">
-      <span class="req-pbar"><i style="width:${Math.min(100, st.pct)}%"></i></span>
+      <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
       <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
+      ${deviTxt ? `<span class="req-devi ${stCls}" title="实际完成度 ${st.pct.toFixed(1)}% − 计划应达 ${st.planPct.toFixed(1)}%（PV 按各任务的计划窗口算）">${deviTxt}</span>` : ''}
     </td>
     <td>${shipCell(ship)}</td>
     <td class="req-ops req-act">
@@ -164,7 +171,7 @@ function detailHtml(mo, ctx) {
   const ship = shipInfo(mo, ctx);
   const ver = versionOfMod(ctx.state, mo.name);
   const rng = mo.unscheduled ? null : ctx.modRange(mo);
-  const st = modStats(mo.bars, rng, ctx);
+  const st = modStats(mo.bars, ctx);
   const desc = (mo.desc || '').trim();
   const docUrl = safeDocUrl(mo.docUrl);
   const per = computeModulePer(mo.bars || [], ctx.state.resources);

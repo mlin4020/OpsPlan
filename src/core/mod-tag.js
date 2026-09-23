@@ -6,7 +6,7 @@
 //
 // 依赖方向：本模块 → task-status（需求状态由任务状态汇总而来），单向。
 // ============================================================
-import { F } from './dates.js';
+import { F, fmt } from './dates.js';
 import { PNAME } from './default-data.js';
 import { isOverdueTask } from './task-status.js';
 
@@ -88,28 +88,51 @@ export function currentPhase(mo, today) {
 }
 
 /**
- * 计划应达基线（时间口径）：需求时间跨度到今天已经走过的比例
+ * 计划应达基线（工作量口径，即 EVM 的 Planned Value）：到 today 为止，
+ * **按计划应该完成的人日**占总人日的比例。
  *
- * 语义 =「按计划时间，现在应该推进到哪里」，与「实际完成度」相减得到偏差：
- *   偏差 > 0 → 超前；< 0 → 延后。回答的就是「进度是否跟得上时间」。
+ * 语义 =「按计划，现在应该推进到哪里」，与「实际完成度 EV」相减得到偏差：
+ *   偏差 > 0 → 超前；< 0 → 延后。
  *
- * 刻意不做工作量（人日）加权：工作量在时间轴上的分布并不均匀（前重后轻、并行、
- * 依赖等待空档都很常见），人日加权会把「前期任务重」的需求应达值顶得很高
- * （时间才过 1/4、应达却已 70%），与"目前是否按计划正常推进"的直觉严重背离。
+ * 每个普通任务按其计划窗口贡献 PV：
+ *   · 计划结束日 ≤ today → 全额计入（这段计划本来今天就该做完；做没做是 EV 的事）
+ *   · 计划开始日 > today → 不计入（还没到该做的时候）
+ *   · 跨 today           → 按已过的计划工作日比例计入
  *
- * 需求范围取 modRange（含里程碑），与进度条自身的宽度口径一致 ——
- * 因此该值在条上的落点恰好就是「今日线」的位置。
+ * 为什么不用「需求时间跨度的流逝比例」（2026-09-23 修正前的旧口径）：
+ *   它隐含假设"工作量在时间上均匀分布"，而真实计划常常前重后轻 ——
+ *   「县域-得分排名」19 人日里有 18 人日的任务计划在 9/23 前完成，需求跨度却因
+ *   末尾的上线里程碑拉到 10/15；旧口径算出"只走过 42%"，于是把一条**有任务已逾期
+ *   未完成**的需求判成「超前」。按工作量口径应达 94.7%、实际 78.9% → 延后，
+ *   与事实一致。旧注释担心的"人日加权把应达顶得很高"其实不是失真：
+ *   计划把 90% 的活排在前半段，前半段结束时本来就该完成 90%。
  *
- * @param {{start:Date,end:Date}|null} rng 需求时间范围（modRange 结果，来自 views/index.js）
+ * ⚠️ workday 必须与 EV（modStats 的 work/done）同源，否则 PV 与 EV 的分母口径
+ * 不一致，两者相减出来的偏差就没有意义。
+ *
+ * @param {Array} bars 需求内的任务条（含里程碑，内部过滤）
  * @param {Date} today 今日
+ * @param {{workDays:(s:string,e:string)=>number}} workday 工作日口径
  * @returns {number} 0~100 的百分比，保留两位小数
  */
-export function computePlanPct(rng, today) {
-  if (!rng || !rng.start || !rng.end) return 0;
-  const span = rng.end.getTime() - rng.start.getTime();
-  if (span <= 0) return 100;                                 // 单点需求：视为已到期
-  const passed = today.getTime() - rng.start.getTime();
-  return Math.max(0, Math.min(100, Math.round(passed / span * 10000) / 100));
+export function computePlanPct(bars, today, workday) {
+  const tasks = (bars || []).filter(b => !b.m && b.s && b.e);
+  if (!tasks.length || !workday || typeof workday.workDays !== 'function') return 0;
+  const day = today instanceof Date
+    ? new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    : F(today);
+  // workDays 内部走 F()，只吃 "YYYY-MM-DD" 字符串 —— 这里必须传字符串，不能传 Date
+  const dayStr = fmt(day);
+  let total = 0, planned = 0;
+  tasks.forEach(b => {
+    const w = workday.workDays(b.s, b.e);
+    if (!w) return;
+    total += w;
+    if (F(b.e) <= day) { planned += w; return; }                  // 计划已完成
+    if (F(b.s) > day) return;                                      // 计划未开始
+    planned += w * Math.min(1, workday.workDays(b.s, dayStr) / w); // 跨今天
+  });
+  return total ? Math.max(0, Math.min(100, Math.round(planned / total * 10000) / 100)) : 0;
 }
 
 /**

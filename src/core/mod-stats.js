@@ -12,7 +12,7 @@
 // ============================================================
 import { computePlanPct } from './mod-tag.js';
 
-export function modStats(bars, rng, ctx) {
+export function modStats(bars, ctx) {
   const { workday, today } = ctx;
   const tasks = (bars || []).filter(b => !b.m && b.s && b.e);
   const work = tasks.reduce((a, b) => a + workday.workDays(b.s, b.e), 0);
@@ -20,6 +20,8 @@ export function modStats(bars, rng, ctx) {
   return {
     work, done,
     pct: work ? Math.round((done / work * 100) * 100) / 100 : 0,
-    planPct: computePlanPct(rng, today)
+    // PV 按任务的计划窗口算，与 EV 共用同一份 workday 口径（见 computePlanPct 注释），
+    // 因此不再需要调用方传 rng —— 需求时间跨度只用于画条，不参与"应达多少"的判断
+    planPct: computePlanPct(bars, today, workday)
   };
 }

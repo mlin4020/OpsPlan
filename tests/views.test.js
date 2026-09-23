@@ -509,6 +509,20 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('未加入版本');   // 数据看板 / 移动端适配均无版本
     expect(html).toContain('V2.3');        // 官网改版有版本
   });
+
+  it('进度列显示偏差，延后时进度条变色（与总览卡片同口径）', () => {
+    const ctx = makeReqCtx();
+    // 造一个"计划已到期但未完成"的任务 + 一个远期的收口任务：
+    // PV 被前段的任务顶高、EV 为 0 → 偏差为负 → 必须显示「延后」且进度条转红
+    ctx.state.modules[0].bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-07', w: 5, done: 0, res: [] },
+      { id: 'b', p: 'go', s: '2026-12-01', e: '2026-12-01', w: 1, done: 0, res: [] }
+    ];
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('req-devi');
+    expect(html).toContain('延后');
+    expect(html).toContain('<i class="late"');   // 进度条填充转红
+  });
 });
 
 describe('views: 需求台账展开档案', () => {

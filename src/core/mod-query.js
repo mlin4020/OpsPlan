@@ -85,9 +85,10 @@ function sortValue(mo, key, deps) {
       return { v: key === 'start' ? rng.start.getTime() : rng.end.getTime() };
     }
     case 'pct': {
+      // 无排期的需求没有可信的进度，排最后（rng 只用于这个判空，不再传给 modStats）
       const rng = modRange ? modRange(mo) : null;
       if (!rng || !ctx) return { miss: true };
-      return { v: modStats(mo.bars, rng, ctx).pct };
+      return { v: modStats(mo.bars, ctx).pct };
     }
     case 'ship': {
       // 计划上线日口径与台账展示一致：版本日优先，无版本回退该需求的「上线」里程碑

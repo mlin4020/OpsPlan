@@ -173,31 +173,61 @@ describe('core/workday (createWorkday 依赖注入)', () => {
   });
 });
 
-describe('core/mod-tag: computePlanPct 计划应达基线（时间口径，不做工作量加权）', () => {
-  // 需求范围 2026-08-17 ~ 2026-08-31，日历跨度 14 天
-  const rng = { start: F('2026-08-17'), end: F('2026-08-31') };
+describe('core/mod-tag: computePlanPct 计划应达基线（工作量口径 = EVM 的 PV）', () => {
+  // 工作日简算：周一~周五（不引入假期，隔离掉 workday 的复杂度）
+  const wd = {
+    workDays: (s, e) => {
+      let n = 0; const d = F(s); const end = F(e);
+      while (d <= end) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; d.setDate(d.getDate() + 1); }
+      return n;
+    }
+  };
+  const bar = o => ({ id: 'x', p: 'dev', ...o });
 
-  it('取需求时间跨度已过的比例，与人日分布无关', () => {
-    // 08-17 起算：08-20 过 3 天 → 3/14 = 21.43%
-    expect(computePlanPct(rng, F('2026-08-20'))).toBe(21.43);
-    // 08-26 过 9 天 → 9/14 = 64.29%
-    expect(computePlanPct(rng, F('2026-08-26'))).toBe(64.29);
+  it('计划结束日已过的任务全额计入 PV（做没做是 EV 的事）', () => {
+    // 8/17(一)~8/21(五) = 5 人日，今天 8/24（下周一）→ 已过
+    const bars = [bar({ s: '2026-08-17', e: '2026-08-21', w: 5, done: 40 })];
+    expect(computePlanPct(bars, F('2026-08-24'), wd)).toBe(100);
   });
 
-  it('边界：起始日 0%、结束日 100%、越界钳制在 0~100', () => {
-    expect(computePlanPct(rng, F('2026-08-17'))).toBe(0);
-    expect(computePlanPct(rng, F('2026-08-31'))).toBe(100);
-    expect(computePlanPct(rng, F('2026-08-01'))).toBe(0);
-    expect(computePlanPct(rng, F('2026-09-30'))).toBe(100);
+  it('计划未开始的任务不计入 PV', () => {
+    const bars = [bar({ s: '2026-08-24', e: '2026-08-28', w: 5, done: 0 })];
+    expect(computePlanPct(bars, F('2026-08-20'), wd)).toBe(0);
   });
 
-  it('单点需求（跨度 0）视为已到期 → 100%', () => {
-    expect(computePlanPct({ start: F('2026-08-17'), end: F('2026-08-17') }, F('2026-08-17'))).toBe(100);
+  it('跨今天的任务按已过的计划工作日比例计入', () => {
+    // 8/17(一)~8/21(五) 共 5 人日，今天 8/19(三) → 已过 8/17、8/18、8/19 → 3/5
+    const bars = [bar({ s: '2026-08-17', e: '2026-08-21', w: 5 })];
+    expect(computePlanPct(bars, F('2026-08-19'), wd)).toBe(60);
   });
 
-  it('无需求范围 → 0', () => {
-    expect(computePlanPct(null, F('2026-08-20'))).toBe(0);
-    expect(computePlanPct({}, F('2026-08-20'))).toBe(0);
+  it('里程碑不参与 PV（0 天单点没有工作量）', () => {
+    const bars = [
+      bar({ id: 'a', s: '2026-08-17', e: '2026-08-21', w: 5, done: 0 }),
+      { id: 'm', m: '2026-08-18', p: 'go', label: '上线' }
+    ];
+    expect(computePlanPct(bars, F('2026-08-17'), wd)).toBe(20);   // 只算 a：1/5
+  });
+
+  it('前重后轻的计划：末尾空档不得把「逾期未完成」算成「超前」（回归）', () => {
+    // 复现「县域-得分排名」的形状：19 人日里 18 人日的任务计划在 9/23 前完成，
+    // 末尾一个 1 人日的上线排到 10/15。旧口径（时间流逝比例 16/38 = 42.11%）
+    // 会把这条需求判成"超前"，而它其实有一条任务已逾期未完成。
+    const bars = [
+      bar({ id: 'a', s: '2026-09-07', e: '2026-09-11', w: 5, done: 100 }),
+      bar({ id: 'b', s: '2026-09-07', e: '2026-09-11', w: 5, done: 100 }),
+      bar({ id: 'c', s: '2026-09-14', e: '2026-09-18', w: 5, done: 100 }),
+      bar({ id: 'd', p: 'sit', s: '2026-09-14', e: '2026-09-16', w: 3, done: 0 }),   // 计划已到期、未完成
+      bar({ id: 'e', p: 'go', s: '2026-10-15', e: '2026-10-15', w: 1, done: 0 })
+    ];
+    // 总 19 人日；到 9/23 计划应完成 18（只有 go 还没到）→ PV = 18/19 = 94.74%
+    expect(computePlanPct(bars, F('2026-09-23'), wd)).toBeCloseTo(94.74, 1);
+  });
+
+  it('无任务 / 缺 workday → 0（不抛错）', () => {
+    expect(computePlanPct([], F('2026-08-20'), wd)).toBe(0);
+    expect(computePlanPct(null, F('2026-08-20'), wd)).toBe(0);
+    expect(computePlanPct([bar({ s: '2026-08-17', e: '2026-08-21' })], F('2026-08-20'), {})).toBe(0);
   });
 
   it('computeModuleTag 排除里程碑：任务全完成即「已完成」', () => {
@@ -433,7 +463,7 @@ describe('core: modStats 需求级进度（人日口径）', () => {
       { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-10', done: 100 },   // 10 人日全完成
       { id: 'b', p: 'sit', s: '2026-08-11', e: '2026-08-20', done: 0 }      // 10 人日未开始
     ];
-    const r = modStats(bars, { start: F('2026-08-01'), end: F('2026-08-20') }, ctx);
+    const r = modStats(bars, ctx);
     expect(r.work).toBe(20);
     expect(r.done).toBe(10);
     expect(r.pct).toBe(50);
@@ -444,17 +474,30 @@ describe('core: modStats 需求级进度（人日口径）', () => {
       { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-10', done: 100 },
       { id: 'm', m: '2026-08-20', p: 'go', label: '上线' }
     ];
-    expect(modStats(bars, { start: F('2026-08-01'), end: F('2026-08-20') }, ctx).work).toBe(10);
+    expect(modStats(bars, ctx).work).toBe(10);
   });
 
   it('没有可算的任务时 pct 为 0（不出现 NaN）', () => {
-    expect(modStats([], null, ctx).pct).toBe(0);
+    expect(modStats([], ctx).pct).toBe(0);
   });
 
-  it('planPct 来自需求时间范围走过的比例', () => {
-    // 8/1 ~ 8/21 共 20 天，今天 8/20 → 走过 19/20 = 95%
-    const r = modStats([{ id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-21', done: 0 }],
-      { start: F('2026-08-01'), end: F('2026-08-21') }, ctx);
-    expect(r.planPct).toBe(95);
+  it('planPct 按任务的计划窗口算（PV），不再看需求时间跨度', () => {
+    // ctx.workday 是"含首尾日历日"简算：8/1~8/21 = 21 天，今天 8/20 → 已过 20 天
+    // 该任务跨今天 → planned = 21 × 20/21 = 20 → PV = 20/21 = 95.24%
+    const r = modStats([{ id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-21', done: 0 }], ctx);
+    expect(r.planPct).toBe(95.24);
+  });
+
+  it('前重后轻：末尾长空档不抬高 PV，有任务到期未完成就该判延后', () => {
+    const bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-05', done: 100 },   // 5 人日，计划已完成
+      { id: 'b', p: 'sit', s: '2026-08-06', e: '2026-08-10', done: 0 },     // 5 人日，计划已到期未完成
+      { id: 'c', p: 'go',  s: '2026-09-30', e: '2026-09-30', done: 0 }      // 1 人日，还很远
+    ];
+    const r = modStats(bars, ctx);
+    // EV = 5/11 = 45.45%；PV = 10/11 = 90.91% → 偏差为负（延后）
+    expect(r.pct).toBeCloseTo(45.45, 1);
+    expect(r.planPct).toBeCloseTo(90.91, 1);
+    expect(r.pct - r.planPct).toBeLessThan(0);
   });
 });
