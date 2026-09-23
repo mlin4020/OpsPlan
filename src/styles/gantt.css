@@ -921,6 +921,9 @@ body.readonly-mode .ver-act{display:none}
 .req-table th[data-req-sort]:hover{color:var(--accent)}
 .req-table th.on{color:var(--accent)}
 .req-table td{padding:9px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+/* 表格里的状态标签不折行：.tag 只有 flex:none（只在 flex 容器里防压缩），
+   放进 <td> 就失效了，窄列会把「已完成」压成两行 */
+.req-table .tag{white-space:nowrap}
 .req-row{cursor:pointer;transition:background .12s}
 .req-row:hover{background:var(--accent-soft)}
 .req-c-name{min-width:180px}
@@ -945,6 +948,10 @@ body.readonly-mode .req-act{display:none}
 /* 展开档案 */
 .req-detail-tr>td{padding:0;background:#fbfcfe}
 .req-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:14px 16px;border-left:3px solid var(--accent)}
+/* 阶段明细与里程碑内容宽（明细行含日期/人日/负责人/进度条，里程碑是横向 chip 流），
+   必须跨满整行 —— 否则会在 auto-fit 网格里被挤成 260px 窄列，.rmod-row 的文字
+   被压成竖排（"3 人日" 拆成 "3/人/日"），完全没法读。 */
+.req-detail-sec[data-req-sec="phases"],.req-detail-sec[data-req-sec="ms"]{grid-column:1/-1}
 .req-detail-sec h5{margin:0 0 6px;font-size:11.5px;font-weight:800;color:#475569}
 .req-desc-full{margin:0;font-size:12.5px;color:#334155;line-height:1.7;white-space:pre-wrap;word-break:break-word}
 .req-kv{display:flex;flex-direction:column;gap:4px}

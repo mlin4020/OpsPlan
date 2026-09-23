@@ -55,7 +55,9 @@ export function shipInfo(mo, ctx) {
     text: st.text, color: st.color,
     plan: v.date || planFromMs,
     actual: v.shipped ? v.shippedAt : null,
-    late: modLate(v, mo)
+    // 已上线的版本不再有"赶不上"风险 —— 都已经发布完了，再报风险只会误导读者
+    // （modLate 只看"最晚完成日是否晚于版本日"，不看版本是否已发货）
+    late: v.shipped ? null : modLate(v, mo)
   };
 }
 
@@ -79,8 +81,11 @@ function docCell(mo) {
 
 function shipCell(ship) {
   const parts = [`<span class="tag" style="background:${ship.color}">${ship.text}</span>`];
+  // plan / actual 是 "YYYY-MM-DD" 字符串 → 需要 F() 转 Date
   if (ship.plan) parts.push(`<span class="req-sub">计划 ${fmtD(F(ship.plan))}</span>`);
   if (ship.actual) parts.push(`<span class="req-sub">实际 ${fmtD(F(ship.actual))}</span>`);
+  // ⚠️ ship.late.end 则**已经是 Date**（core/versions.js 的 modLatestEnd 返回 Date），
+  // 不能再包 F()：F 按 "YYYY-MM-DD" 切字符串，传 Date 会得到 Invalid Date → 渲染成 "NaN/NaN"
   if (ship.late) parts.push(`<span class="req-late" title="按当前排期算，最晚 ${fmtD(ship.late.end)} 才完成">赶不上 · 晚 ${ship.late.days} 天</span>`);
   return parts.join(' ');
 }
@@ -184,7 +189,7 @@ function detailHtml(mo, ctx) {
           <span><i>计划上线</i><b>${ship.plan ? fmtD(F(ship.plan)) : '—'}</b></span>
           <span><i>实际上线</i><b>${ship.actual ? fmtD(F(ship.actual)) : '—'}</b></span>
         </div>
-        ${ship.late ? `<p class="req-late-note">按当前排期算，最晚 ${fmtD(F(ship.late.end))} 才能完成，比版本上线日晚 ${ship.late.days} 天。</p>` : ''}
+        ${ship.late ? `<p class="req-late-note">按当前排期算，最晚 ${fmtD(ship.late.end)} 才能完成，比版本上线日晚 ${ship.late.days} 天。</p>` : ''}
       </div>
       <div class="req-detail-sec" data-req-sec="progress">
         <h5>排期与进度</h5>

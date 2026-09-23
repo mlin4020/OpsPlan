@@ -580,4 +580,26 @@ describe('views: 需求台账展开档案', () => {
     toggleReqExpanded('数据看板');
     expect((html.match(/class="req-detail-tr"/g) || []).length).toBe(1);
   });
+
+  it('未上线版本的「赶不上」把最晚完成日渲染成合法日期（不能是 NaN）', () => {
+    const ctx = makeReqCtx();
+    // 版本日远早于成员任务的最晚结束日 → 必然判定"赶不上"，从而走到那段文案
+    ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-08-01', shipped: false, shippedAt: null, mods: ['官网改版'] }];
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('赶不上');
+    // ship.late.end 是 Date 而非 "YYYY-MM-DD"：误包一层 F() 会渲染成 "NaN/NaN"
+    expect(html).not.toContain('NaN');
+  });
+
+  it('已上线的版本不显示「赶不上」预警（都发布完了，再报风险只会误导读者）', () => {
+    const ctx = makeReqCtx();
+    ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-08-01', shipped: true, shippedAt: '2026-08-05', mods: ['官网改版'] }];
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('已上线');
+    expect(html).not.toContain('赶不上');
+  });
 });
