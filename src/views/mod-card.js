@@ -34,9 +34,33 @@ export function archivedAtText(v) {
   return `${d.getMonth() + 1}/${d.getDate()} 归档`;
 }
 
+// 需求阶段明细行（总览卡片展开区与需求台账的展开档案共用同一份 DOM）
+// 台账页直接调用本函数，不复制列结构与口径 —— 两处各写一份必然漂移。
+export function renderModDetailRows(mo, ctx) {
+  const { workday } = ctx;
+  return ((mo && mo.bars) || []).filter(b => !b.m).sort((a, b) => F(a.s) - F(b.s)).map(b => {
+    const pc = PCOL[b.p] || '#94a3b8';
+    const phaseName = PNAME[b.p] || '任务';
+    const taskName = (b.name || '').trim() || phaseName;   // 未自定义名时回退阶段名
+    // 自定义过任务名时补一个阶段小标签，便于区分同阶段下的多个任务（如多个 dev 任务）
+    const phaseTag = taskName !== phaseName
+      ? `<span class="rmod-row-phase" style="color:${pc};background:${pc}14;border-color:${pc}33">${phaseName}</span>`
+      : '';
+    return `<div class="rmod-row"><span class="steel" style="background:${pc}"></span>
+      <b title="${phaseName} · ${taskName}">${taskName}</b>${phaseTag}<span class="rmod-dates">${fmtD(F(b.s))}~${fmtD(F(b.e))}</span>
+      <span class="rmod-work">${workday.workDays(b.s, b.e)} 人日</span>
+      ${b.res && b.res.length ? `<span class="rmod-res">${b.res.join('、')}</span>` : ''}
+      <span class="rmod-pct-bar"><i style="width:${Math.min(100, b.done || 0)}%"></i></span>
+      <span class="rmod-pct">${b.done || 0}%</span>
+      ${(b.done || 0) >= 100 ? '<span class="rmod-st done">已完成</span>' : ''}
+      <span class="rmod-st ${b.manual ? 'man' : 'auto'}">${b.manual ? '手动' : '自动'}</span>
+    </div>`;
+  }).join('');
+}
+
 // 单个需求的进度卡片（普通需求与归档需求共用同一渲染逻辑）
 export function renderModCard(mo, ctx, opts = {}) {
-  const { state, today, modRange, workday } = ctx;
+  const { state, today, modRange } = ctx;
   const isExpanded = opts.isExpanded || (() => false);
   const archivedAt = opts.archivedAt || '';
   const actions = opts.actions || '';
@@ -83,24 +107,7 @@ export function renderModCard(mo, ctx, opts = {}) {
       <i></i><b></b><em>${lbl}</em></div>`;
   }).join('') : '';
   const open = isExpanded(mo.name);
-  const detailRows = open ? bars.filter(b => !b.m).sort((a, b) => F(a.s) - F(b.s)).map(b => {
-    const pc = PCOL[b.p] || '#94a3b8';
-    const phaseName = PNAME[b.p] || '任务';
-    const taskName = (b.name || '').trim() || phaseName;   // 未自定义名时回退阶段名
-    // 自定义过任务名时补一个阶段小标签，便于区分同阶段下的多个任务（如多个 dev 任务）
-    const phaseTag = taskName !== phaseName
-      ? `<span class="rmod-row-phase" style="color:${pc};background:${pc}14;border-color:${pc}33">${phaseName}</span>`
-      : '';
-    return `<div class="rmod-row"><span class="steel" style="background:${pc}"></span>
-      <b title="${phaseName} · ${taskName}">${taskName}</b>${phaseTag}<span class="rmod-dates">${fmtD(F(b.s))}~${fmtD(F(b.e))}</span>
-      <span class="rmod-work">${workday.workDays(b.s, b.e)} 人日</span>
-      ${b.res && b.res.length ? `<span class="rmod-res">${b.res.join('、')}</span>` : ''}
-      <span class="rmod-pct-bar"><i style="width:${Math.min(100, b.done || 0)}%"></i></span>
-      <span class="rmod-pct">${b.done || 0}%</span>
-      ${(b.done || 0) >= 100 ? '<span class="rmod-st done">已完成</span>' : ''}
-      <span class="rmod-st ${b.manual ? 'man' : 'auto'}">${b.manual ? '手动' : '自动'}</span>
-    </div>`;
-  }).join('') : '';
+  const detailRows = open ? renderModDetailRows(mo, ctx) : '';
 
   const barTodayHtml = rng ? `<i class="rmod-bar-today" style="left:${todayPos.toFixed(1)}%"></i>` : '';
   // 进度填充色：与排期总览一致 —— 正常/超前=标准绿(green-600)，延期=标准红(red-600)

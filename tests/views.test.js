@@ -10,6 +10,7 @@ import { priorityBadge } from '../src/views/badge.js';
 import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
 import { renderArchiveView } from '../src/views/archive-view.js';
+import { renderModDetailRows } from '../src/views/mod-card.js';
 
 // 构造最小渲染 ctx（与 renderAll 的 buildViewCtx 契约对齐）
 function makeCtx() {
@@ -454,5 +455,35 @@ describe('views: renderAll 横向滚动位置保持', () => {
     const { gantt, gsc } = shell(720);
     renderAll(ctxFor(gantt, gsc, { scrollLeft: 1200 }));
     expect(gsc.scrollLeft).toBe(1200);
+  });
+});
+
+describe('views: renderModDetailRows 需求阶段明细', () => {
+  it('每个普通任务一行，含阶段色条、日期、人日、负责人、进度', () => {
+    const ctx = makeCtx();
+    const mo = { name: 'X', bars: [
+      { id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-14', w: 3, done: 50, res: ['张三'] },
+      { id: 'b', p: 'sit', s: '2026-08-17', e: '2026-08-18', w: 2, done: 0, res: [] }
+    ] };
+    const html = renderModDetailRows(mo, ctx);
+    expect((html.match(/class="rmod-row"/g) || []).length).toBe(2);
+    expect(html).toContain('rmod-dates');
+    expect(html).toContain('人日');
+    expect(html).toContain('rmod-pct-bar');
+    expect(html).toContain('张三');
+  });
+
+  it('里程碑不占明细行', () => {
+    const ctx = makeCtx();
+    const mo = { name: 'X', bars: [
+      { id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-14', w: 3, done: 0, res: [] },
+      { id: 'm', m: '2026-08-20', p: 'go', label: '上线' }
+    ] };
+    expect((renderModDetailRows(mo, ctx).match(/class="rmod-row"/g) || []).length).toBe(1);
+  });
+
+  it('空需求返回空串（台账展开区据此不渲染该段）', () => {
+    expect(renderModDetailRows({ name: 'X', bars: [] }, makeCtx())).toBe('');
+    expect(renderModDetailRows({ name: 'X' }, makeCtx())).toBe('');
   });
 });
