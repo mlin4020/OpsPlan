@@ -534,3 +534,39 @@ describe('需求台账：生命周期徽标样式契约', () => {
     expect(css).toMatch(/\.lc-none\{[^}]*border-style:dashed/);
   });
 });
+
+describe('需求台账：提出信息与生命周期字段贯通', () => {
+  const modals = readFileSync(resolve(ROOT, 'src/components/modals.js'), 'utf8');
+  const shell = readFileSync(resolve(ROOT, 'src/components/shell.js'), 'utf8');
+  const muts = readFileSync(resolve(ROOT, 'src/scheduler/mutations.js'), 'utf8');
+
+  it('抽屉里有提出人 / 提出时间 / 生命周期三个控件与候选容器', () => {
+    expect(shell).toContain('id="newModProposedBy"');
+    expect(shell).toContain('id="newModProposedAt"');
+    expect(shell).toContain('id="segModLc"');
+    expect(shell).toContain('id="modProposerList"');
+    expect(shell).toContain('data-lc=""');          // 「未设置」档必须在
+  });
+
+  it('打开时回显：新建默认「待确认」+ 当天，编辑回显原值', () => {
+    expect(modals).toMatch(/renderModLcSeg\(LIFECYCLE_DEFAULT, deps\)/);
+    expect(modals).toMatch(/renderModLcSeg\(mo\.lifecycle, deps\)/);
+    expect(modals).toMatch(/g\('newModProposedAt'\)\.value = todayStr\(deps\)/);
+    expect(modals).toMatch(/g\('newModProposedAt'\)\.value = mo\.proposedAt \|\| ''/);
+    expect(modals).toMatch(/renderProposerOptions\(deps\)/);
+  });
+
+  it('保存时新增与编辑两条路径都提交三个字段', () => {
+    expect(modals).toMatch(/addModule\(\{[\s\S]*?proposedBy:[\s\S]*?proposedAt:[\s\S]*?lifecycle:/);
+    expect(modals).toMatch(/updateModule\(\{[\s\S]*?proposedBy:[\s\S]*?proposedAt:[\s\S]*?lifecycle:/);
+  });
+
+  it('数据层接受三个字段并支持清空', () => {
+    expect(muts).toMatch(/if \(opts\.proposedBy != null\)/);
+    expect(muts).toMatch(/delete mo\.proposedBy/);
+    expect(muts).toMatch(/if \(opts\.proposedAt != null\)/);
+    expect(muts).toMatch(/delete mo\.proposedAt/);
+    expect(muts).toMatch(/if \('lifecycle' in opts\)/);
+    expect(muts).toMatch(/delete mo\.lifecycle/);
+  });
+});

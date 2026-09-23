@@ -343,6 +343,15 @@ ${mobileSheetHTML()}
     <div class="f-row"><label>需求名称</label><input type="text" id="newModName" placeholder="如：数据服务"></div>
     <div class="f-row"><label>标签</label><input type="text" id="newModTag" placeholder="如：开发中 / 冲刺中 / 待启动"></div>
     <div class="f-row"><label>需求颜色<span class="phase-tip">同一需求的任务条 / 里程碑统一用它</span></label><input type="color" id="newModTagc" value="#3b82f6"><span class="phase-tip" id="newModTagcTip" style="margin-left:0"></span></div>
+    <div class="f-row">
+      <label>提出人<span class="phase-tip">可选已有提出人，也可直接输入新的</span></label>
+      <input type="text" id="newModProposedBy" list="modProposerList" placeholder="如：业务方张三">
+      <datalist id="modProposerList"></datalist>
+    </div>
+    <div class="f-row">
+      <label>提出时间<span class="phase-tip">新建默认今天，可改可清空</span></label>
+      <input type="date" id="newModProposedAt">
+    </div>
     <div class="f-row"><label>描述<span class="phase-tip">给领导 / 业务看的一段说明，会显示在需求台账页</span></label><textarea id="newModDesc" rows="3" placeholder="这个需求要解决什么问题、范围是什么"></textarea></div>
     <div class="f-row"><label>需求文档<span class="phase-tip">外部链接（语雀 / 飞书文档 / Confluence）</span></label><input type="text" id="newModDocUrl" placeholder="https://..."></div>
     <div class="f-row">
@@ -360,6 +369,16 @@ ${mobileSheetHTML()}
         <button type="button" class="btn" data-pri="P1">P1</button>
         <button type="button" class="btn" data-pri="P2">P2</button>
         <button type="button" class="btn" data-pri="P3">P3</button>
+      </div>
+    </div>
+    <div class="f-row">
+      <label>生命周期<span class="phase-tip" id="modLcTip">人工维护的流程门；与台账「状态」列（自动计算）不是一回事</span></label>
+      <div class="seg" id="segModLc">
+        <button type="button" class="btn" data-lc="">未设置</button>
+        <button type="button" class="btn" data-lc="待确认">待确认</button>
+        <button type="button" class="btn" data-lc="已确认">已确认</button>
+        <button type="button" class="btn" data-lc="已提测">已提测</button>
+        <button type="button" class="btn" data-lc="已上线">已上线</button>
       </div>
     </div>
     <div class="f-row" id="rowNewModPhases">

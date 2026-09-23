@@ -8,10 +8,22 @@
 // 只读：可编辑守卫在 SCHED 内（addModule 抛错），此处 UI 由工具栏 disabled 禁用
 // ============================================================
 import { moduleTag } from '../core/mod-tag.js';
+import { collectProposers } from '../core/mod-query.js';
+import { fmt } from '../core/dates.js';
 import { nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-color.js';
-import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
+import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority, LIFECYCLE_DEFAULT, normalizeLifecycle } from '../core/default-data.js';
 
 let modEditName = null;   // 编辑模式：当前正在编辑的需求名（null=新增模式）
+
+// 属性值转义：datalist 的候选来自用户输入（提出人），必须转义后再拼 HTML
+const escAttr = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// 今天的 YYYY-MM-DD：优先用 deps.today（渲染 ctx 的基准日），便于测试固定日期
+function todayStr(deps) {
+  const t = typeof deps.today === 'function' ? deps.today() : (deps.today || new Date());
+  return fmt(t);
+}
 
 // 渲染「初始化阶段」勾选框（按 MODULE_PHASES 默认模板顺序；defaultAll=true 时全部默认勾选）
 // 回归测试不在默认模板内（属项目级「回归验证」），故不在此列出
@@ -66,10 +78,14 @@ function openNewModModal(deps) {
   // 任务条也就失去区分作用
   g('newModTagc').value = nextModuleColor(deps.planStore.state.modules);
   refreshModColorTip(deps);
+  g('newModProposedBy').value = '';
+  g('newModProposedAt').value = todayStr(deps);
   g('newModDesc').value = '';
   g('newModDocUrl').value = '';
   renderModSchedSeg(false, deps);   // 默认「已排期」
   renderModPriSeg(PRIORITY_DEFAULT, deps);   // 新建默认 P2（未设置留给历史数据）
+  renderProposerOptions(deps);                       // 新建也要能选已有提出人
+  renderModLcSeg(LIFECYCLE_DEFAULT, deps);           // 新建默认「待确认」
   g('btnNewModSave').textContent = '创建';
   const delBtn = g('btnDelMod'); if (delBtn) delBtn.style.display = 'none';
   const phaseRow = g('rowNewModPhases'); if (phaseRow) phaseRow.style.display = '';
@@ -93,11 +109,16 @@ function openEditModModal(modName, deps) {
   // 回显原始 tagc 会让弹窗与图上的条色 / 色点对不上（历史数据里 tagc 默认全是同一个蓝）
   g('newModTagc').value = modColors[mo.name] || mo.tagc || autoTagc;
   refreshModColorTip(deps);
+  g('newModProposedBy').value = mo.proposedBy || '';
+  g('newModProposedAt').value = mo.proposedAt || '';
   g('newModDesc').value = mo.desc || '';
   g('newModDocUrl').value = mo.docUrl || '';
   renderModSchedSeg(!!mo.unscheduled, deps);
   // 回显实际值：老数据无 pri 时选中「无」，保存后仍是未设置
   renderModPriSeg(mo.pri, deps);
+  renderProposerOptions(deps);
+  // 回显实际值：老数据没有 lifecycle 时选中「未设置」，保存后仍是未设置
+  renderModLcSeg(mo.lifecycle, deps);
   g('btnNewModSave').textContent = '保存';
   const delBtn = g('btnDelMod'); if (delBtn) { delBtn.style.display = ''; delBtn.dataset.modName = modName; }
   const phaseRow = g('rowNewModPhases'); if (phaseRow) phaseRow.style.display = 'none';  // 阶段选择仅用于新建
@@ -134,6 +155,32 @@ function readModPri(deps) {
   const box = deps.getEl('segModPri');
   const on = box ? box.querySelector('.btn.on') : null;
   return (on && on.dataset.pri) || '';
+}
+
+// 生命周期分段控件：未设置 / 待确认 / 已确认 / 已提测 / 已上线。
+// 「未设置」是合法档 —— 老数据没有 lifecycle 字段，编辑时必须能原样保留，
+// 否则一打开编辑再保存就替用户臆造了一个「待确认」。
+function renderModLcSeg(lc, deps) {
+  const box = deps.getEl('segModLc');
+  if (!box) return;
+  const cur = normalizeLifecycle(lc) || '';
+  box.querySelectorAll('.btn').forEach(b => b.classList.toggle('on', (b.dataset.lc || '') === cur));
+}
+
+// 读取当前选中的生命周期（'' = 未设置）
+function readModLc(deps) {
+  const box = deps.getEl('segModLc');
+  const on = box ? box.querySelector('.btn.on') : null;
+  return (on && on.dataset.lc) || '';
+}
+
+// 提出人候选：容器写在抽屉的静态 DOM 里，但候选随数据变化，
+// 故每次打开弹窗按当前需求集合重写（不能写死在 DOM 里）
+function renderProposerOptions(deps) {
+  const list = deps.getEl('modProposerList');
+  if (!list) return;
+  list.innerHTML = collectProposers(deps.planStore.state.modules)
+    .map(n => `<option value="${escAttr(n)}"></option>`).join('');
 }
 
 // 读取当前选中的排期状态
@@ -178,6 +225,12 @@ function bindModalControls(deps) {
     segPri.querySelectorAll('.btn').forEach(x => x.classList.toggle('on', x === b));
   }));
 
+  // 生命周期：多选一分段控件（含「未设置」）
+  const segLc = g('segModLc');
+  if (segLc) segLc.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => {
+    segLc.querySelectorAll('.btn').forEach(x => x.classList.toggle('on', x === b));
+  }));
+
   // 需求颜色：实时提示撞色（input 事件在取色器拖动过程中连续触发，所见即所改）
   const tagcInp = g('newModTagc');
   if (tagcInp) tagcInp.addEventListener('input', () => refreshModColorTip(deps));
@@ -203,7 +256,7 @@ function bindModalControls(deps) {
       }
       try {
         // tagc 落「实际生效色」：与去重逻辑、后续弹窗回显保持同一口径
-        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
+        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
         const collapsed = deps.viewState.collapsed;
         collapsed[name] = collapsed[modEditName];
         if (name !== modEditName) delete collapsed[modEditName];
@@ -216,7 +269,7 @@ function bindModalControls(deps) {
       if (deps.planStore.state.modules.some(m => m.name === name)) { deps.toast('需求已存在：' + name); return; }
       const phases = selectedPhases(deps);
       if (phases === null) { deps.toast('请至少选择一个要初始化的阶段'); return; }
-      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
+      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
       closeNewModModal(deps);
       deps.viewState.collapsed[name] = false;
       deps.render();
