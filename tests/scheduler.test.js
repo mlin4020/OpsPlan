@@ -838,3 +838,53 @@ describe('scheduler: 里程碑局部更新不被降级（回归）', () => {
     expect(Array.isArray(back.res)).toBe(true);   // 转回任务时 res 必须可用
   });
 });
+
+describe('scheduler: 需求提出信息与生命周期字段', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  it('addModule 落提出人与提出时间（提出人 trim）', () => {
+    const sched = makeSched();
+    const mo = sched.addModule({
+      name: '字段样本', autoCreate: false,
+      proposedBy: ' 张三 ', proposedAt: '2026-08-01', lifecycle: '已确认'
+    });
+    expect(mo.proposedBy).toBe('张三');
+    expect(mo.proposedAt).toBe('2026-08-01');
+    expect(mo.lifecycle).toBe('已确认');
+  });
+
+  it('addModule 不传 lifecycle 时不臆造默认值（默认「待确认」由新建弹窗给）', () => {
+    const sched = makeSched();
+    const mo = sched.addModule({ name: '无生命周期', autoCreate: false });
+    // 键存在但值为 undefined —— 与 desc / docUrl 的写法一致（数据层不替用户补值）
+    expect('lifecycle' in mo).toBe(true);
+    expect(mo.lifecycle).toBe(undefined);
+  });
+
+  it('addModule 拒绝非法提出日期（手改 JSON / 外部导入的脏值）', () => {
+    const sched = makeSched();
+    const mo = sched.addModule({ name: '脏日期', autoCreate: false, proposedAt: '2026/08/01' });
+    expect('proposedAt' in mo).toBe(true);
+    expect(mo.proposedAt).toBe(undefined);
+  });
+
+  it('updateModule 传空串 = 清除字段（回到未填写 / 未设置）', () => {
+    const sched = makeSched();
+    sched.addModule({
+      name: '待清空', autoCreate: false,
+      proposedBy: '李四', proposedAt: '2026-08-02', lifecycle: '已提测'
+    });
+    sched.updateModule({ oldName: '待清空', proposedBy: '', proposedAt: '', lifecycle: '' });
+    const mo = mods().find(m => m.name === '待清空');
+    expect('proposedBy' in mo).toBe(false);
+    expect('proposedAt' in mo).toBe(false);
+    expect('lifecycle' in mo).toBe(false);
+  });
+
+  it('updateModule 传非法 lifecycle 等同清除（回到未设置）', () => {
+    const sched = makeSched();
+    sched.addModule({ name: '非法状态', autoCreate: false, lifecycle: '已确认' });
+    sched.updateModule({ oldName: '非法状态', lifecycle: '已验收' });
+    expect('lifecycle' in mods().find(m => m.name === '非法状态')).toBe(false);
+  });
+});

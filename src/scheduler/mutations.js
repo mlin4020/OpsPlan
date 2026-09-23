@@ -9,7 +9,7 @@
 // ============================================================
 import { F } from './planning.js';
 import { fmt, addDays } from '../core/dates.js';
-import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
+import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority, normalizeLifecycle } from '../core/default-data.js';
 import { milestoneName } from '../core/mod-tag.js';
 import { newVersionId, versionOfMap, isGoMs, findGoMs } from '../core/versions.js';
 import { userStore } from '../store/user-store.js';
@@ -287,6 +287,15 @@ export function createMutations(ctx) {
       name,
       tag: (opts.tag || '').trim() || '待启动',
       tagc: opts.tagc || '#3b82f6',
+      // 提出信息与生命周期（设计文档 §3）：
+      //   · 提出人 trim 后空串归一为 undefined（与 desc / docUrl 同口径）
+      //   · 提出时间只接受 YYYY-MM-DD，挡掉手改 JSON / 外部导入的脏值
+      //   · lifecycle 不做默认值 —— 默认「待确认」由新建弹窗给。
+      //     与 pri 的取舍不同：pri 有明确中位档（P2），生命周期没有；
+      //     且老数据必须能原样保留「未设置」，数据层不能替用户臆造
+      proposedBy: (opts.proposedBy || '').trim() || undefined,
+      proposedAt: /^\d{4}-\d{2}-\d{2}$/.test(String(opts.proposedAt || '')) ? String(opts.proposedAt) : undefined,
+      lifecycle: normalizeLifecycle(opts.lifecycle) || undefined,
       // 优先级：新建时给默认值（未传或非法值都落到 PRIORITY_DEFAULT），
       // 历史数据没有该字段则保持 undefined = 未设置，不替用户补值
       pri: normalizePriority(opts.pri) || PRIORITY_DEFAULT,
@@ -383,6 +392,20 @@ export function createMutations(ctx) {
     }
     if (opts.tag != null) mo.tag = (opts.tag || '').trim() || '待启动';
     if (opts.tagc != null) mo.tagc = opts.tagc || '#3b82f6';
+    // 提出信息与生命周期：传空串 / 非法值 = 清除（回到"未填写 / 未设置"），
+    // 与 desc / docUrl 的归一化口径一致（字段直接 delete，不留空串）
+    if (opts.proposedBy != null) {
+      const by = (opts.proposedBy || '').trim();
+      if (by) mo.proposedBy = by; else delete mo.proposedBy;
+    }
+    if (opts.proposedAt != null) {
+      const at = String(opts.proposedAt || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(at)) mo.proposedAt = at; else delete mo.proposedAt;
+    }
+    if ('lifecycle' in opts) {
+      const lc = normalizeLifecycle(opts.lifecycle);
+      if (lc) mo.lifecycle = lc; else delete mo.lifecycle;
+    }
     // 优先级：传 null/'' 表示清除（回到「未设置」），传非法值按清除处理
     if (opts.pri != null || 'pri' in opts) mo.pri = normalizePriority(opts.pri);
     // 排期状态（人工）：true = 待排期。待排期需求不在总览展示排期，也不计入并行/逾期统计
