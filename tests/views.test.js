@@ -558,3 +558,74 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('V2.3');        // 官网改版有版本
   });
 });
+
+describe('views: 需求台账展开档案', () => {
+  it('未展开时不渲染档案行', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).not.toContain('req-detail-tr');
+  });
+
+  it('展开后依次包含描述、文档、上线情况、排期进度、阶段明细、里程碑六段', () => {
+    const ctx = makeReqCtx();
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');   // 复位，避免污染其它用例
+    expect(html).toContain('req-detail-tr');
+    ['desc', 'doc', 'ship', 'progress', 'phases', 'ms']
+      .forEach(s => expect(html).toContain(`data-req-sec="${s}"`));
+  });
+
+  it('描述以原文渲染并保留换行（用 pre-wrap 而非转义丢失）', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].desc = '第一行\n第二行';
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('req-desc-full');
+    expect(html).toContain('第一行');
+  });
+
+  it('未填写描述时给出提示文案，不留空白', () => {
+    const ctx = makeReqCtx();
+    delete ctx.state.modules[0].desc;
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('未填写描述');
+  });
+
+  it('文档链接带 target=_blank 与 rel=noopener', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].docUrl = 'https://example.com/prd';
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('href="https://example.com/prd"');
+    expect(html).toMatch(/target="_blank"[^>]*rel="noopener noreferrer"/);
+  });
+
+  it('javascript: 伪协议链接一律不渲染为可点链接', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].docUrl = 'javascript:alert(1)';
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).not.toContain('javascript:');
+  });
+
+  it('阶段明细复用 renderModDetailRows 的 .rmod-row 结构', () => {
+    const ctx = makeReqCtx();
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    expect(html).toContain('class="rmod-row"');
+  });
+
+  it('只有被点开的那一条输出档案行', () => {
+    const ctx = makeReqCtx();
+    toggleReqExpanded('数据看板');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('数据看板');
+    expect((html.match(/class="req-detail-tr"/g) || []).length).toBe(1);
+  });
+});

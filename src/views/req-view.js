@@ -14,10 +14,11 @@
 // 它是界面临时状态，不该进 planStore（否则污染导出 / 同步 / 撤销）。
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
-import { moduleTag } from '../core/mod-tag.js';
+import { PCOL, PNAME } from '../core/default-data.js';
+import { moduleTag, currentPhase, computeModulePer } from '../core/mod-tag.js';
 import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
 import { filterMods, sortMods } from '../core/mod-query.js';
-import { modStats } from './mod-card.js';
+import { modStats, renderModDetailRows } from './mod-card.js';
 import { priorityBadge } from './badge.js';
 
 const reqExpanded = new Set();
@@ -144,6 +145,69 @@ function filterBar(filter, versions, total, shown) {
   </div>`;
 }
 
+// 里程碑一览：需求内全部里程碑按日期升序（需求确认 / 提测 / 上线…）
+function msList(mo) {
+  const ms = ((mo.bars) || []).filter(b => b.m).sort((a, b) => F(a.m) - F(b.m));
+  if (!ms.length) return '<span class="req-muted">该需求没有里程碑</span>';
+  return ms.map(b => `<span class="req-ms"><i class="req-ms-dot" style="background:${PCOL[b.p] || '#94a3b8'}"></i>${esc(b.label || PNAME[b.p] || '里程碑')}<b>${fmtD(F(b.m))}</b></span>`).join('');
+}
+
+// 展开档案：把「一个需求的完整故事」摊开（设计文档 §4.2）
+// 六段固定顺序：描述 → 文档 → 上线情况 → 排期与进度 → 阶段明细 → 里程碑
+function detailHtml(mo, ctx) {
+  const { today } = ctx;
+  const ship = shipInfo(mo, ctx);
+  const ver = versionOfMod(ctx.state, mo.name);
+  const rng = mo.unscheduled ? null : ctx.modRange(mo);
+  const st = modStats(mo.bars, rng, ctx);
+  const desc = (mo.desc || '').trim();
+  const docUrl = safeDocUrl(mo.docUrl);
+  const per = computeModulePer(mo.bars || [], ctx.state.resources);
+  const devi = st.work ? Math.round((st.pct - st.planPct) * 10) / 10 : 0;
+  const deviTxt = !st.work ? '' : (devi < -0.5 ? `延后 ${Math.abs(devi).toFixed(0)}%` : (devi > 0.5 ? `超前 ${devi.toFixed(0)}%` : '按计划'));
+
+  return `<tr class="req-detail-tr"><td colspan="9">
+    <div class="req-detail">
+      <div class="req-detail-sec" data-req-sec="desc">
+        <h5>需求描述</h5>
+        ${desc ? `<p class="req-desc-full">${esc(desc)}</p>` : '<p class="req-muted">未填写描述 —— 在「编辑」里补充，业务与领导都靠它理解需求</p>'}
+      </div>
+      <div class="req-detail-sec" data-req-sec="doc">
+        <h5>需求文档</h5>
+        ${docUrl ? `<a class="btn sm" href="${esc(docUrl)}" target="_blank" rel="noopener noreferrer">打开需求文档 ↗</a>` : '<p class="req-muted">未填写需求文档链接</p>'}
+      </div>
+      <div class="req-detail-sec" data-req-sec="ship">
+        <h5>上线情况</h5>
+        <div class="req-kv">
+          <span><i>状态</i><b style="color:${ship.color}">${ship.text}</b></span>
+          <span><i>所属版本</i><b>${ver ? esc(ver.name) : '未加入版本'}</b></span>
+          <span><i>计划上线</i><b>${ship.plan ? fmtD(F(ship.plan)) : '—'}</b></span>
+          <span><i>实际上线</i><b>${ship.actual ? fmtD(F(ship.actual)) : '—'}</b></span>
+        </div>
+        ${ship.late ? `<p class="req-late-note">按当前排期算，最晚 ${fmtD(F(ship.late.end))} 才能完成，比版本上线日晚 ${ship.late.days} 天。</p>` : ''}
+      </div>
+      <div class="req-detail-sec" data-req-sec="progress">
+        <h5>排期与进度</h5>
+        <div class="req-kv">
+          <span><i>排期</i><b>${rng ? `${fmtD(rng.start)} ~ ${fmtD(rng.end)}` : (mo.unscheduled ? '待排期' : '—')}</b></span>
+          <span><i>当前阶段</i><b>${currentPhase(mo, today)}</b></span>
+          <span><i>完成度</i><b>${st.pct.toFixed(1)}%（${st.done.toFixed(1)} / ${st.work} 人日）</b></span>
+          <span><i>对比计划</i><b>${deviTxt || '—'}</b></span>
+          <span><i>人员</i><b>${per || '暂无人员'}</b></span>
+        </div>
+      </div>
+      <div class="req-detail-sec" data-req-sec="phases">
+        <h5>阶段明细</h5>
+        ${renderModDetailRows(mo, ctx) || '<p class="req-muted">该需求还没有任务</p>'}
+      </div>
+      <div class="req-detail-sec" data-req-sec="ms">
+        <h5>里程碑</h5>
+        <div class="req-ms-list">${msList(mo)}</div>
+      </div>
+    </div>
+  </td></tr>`;
+}
+
 export function renderReqView(container, ctx) {
   const { state, today } = ctx;
   const all = state.modules || [];
@@ -173,7 +237,8 @@ export function renderReqView(container, ctx) {
     return `<th data-req-sort="${key}" class="${(cls + on).trim()}">${label}${arrow}</th>`;
   };
 
-  const rows = hit.map(mo => rowHtml(mo, ctx)).join('');
+  // 展开档案紧跟在被点开的那一行之后（同一 tbody 内的 detail 行）
+  const rows = hit.map(mo => rowHtml(mo, ctx) + (reqExpanded.has(mo.name) ? detailHtml(mo, ctx) : '')).join('');
 
   return `<div class="report-wrap req-wrap">
     ${head}
