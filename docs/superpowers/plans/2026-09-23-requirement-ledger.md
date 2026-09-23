@@ -398,11 +398,21 @@ export function modStats(bars, rng, ctx) {
 
 - [ ] **Step 4: `mod-card.js` 改为转出**
 
-删除 `src/views/mod-card.js:23-34` 的 `modStats` 定义与上方注释，改为（放在 import 区之后的文件顶部）：
+删除 `src/views/mod-card.js:23-34` 的 `modStats` 定义与上方注释。
+
+**⚠️ 必须写成 import + export 两行，不能用转发式 `export { modStats } from '...'`** —— 转发写法只是把导出转手，**不会在本模块建立绑定**，而 `renderModCard` 内部要调用 `modStats`，用转发写法会直接 `ReferenceError`（本计划初稿就踩了这个坑，导致 13 条卡片渲染测试一起挂，排查成本很高）。
+
+在 import 区补上：
 
 ```js
-// 需求级统计已下沉 core（台账页需要在 core 层排序时用到），此处转出以保持既有调用方不变
-export { modStats } from '../core/mod-stats.js';
+import { modStats } from '../core/mod-stats.js';
+```
+
+把原定义位置替换为：
+
+```js
+// 需求级统计已下沉 core（台账页要在 core 层按完成度排序时用到），此处转出以保持既有调用方不变
+export { modStats };
 ```
 
 同时删除该文件 import 中不再使用的 `computePlanPct`：
