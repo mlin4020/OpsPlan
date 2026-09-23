@@ -815,6 +815,17 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect(html).toContain('req-muted">—');
   });
 
+  it('列头数与主行单元格数一致（12 列，防止加列时只改一半）', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules = [{ name: '单条', bars: [] }];
+    const html = renderReqView(null, ctx);
+    const thead = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
+    const tbody = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
+    // 用 /<th[\s>]/ 而不是 /<th/：后者会把 <thead> 也算成一个列头
+    expect((thead.match(/<th[\s>]/g) || []).length).toBe(12);
+    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(12);
+  });
+
   it('筛选条有生命周期下拉，含四档选项与「未设置」', () => {
     const html = renderReqView(null, makeReqCtx());
     expect(html).toContain('data-req-f="lifecycle"');
