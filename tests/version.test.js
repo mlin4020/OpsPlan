@@ -14,7 +14,7 @@ import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { createPersistence } from '../src/scheduler/persistence.js';
 import {
-  versionOfMap, versionProgress, versionStatus, modLate, sortVersions
+  versionOfMap, versionProgress, versionStatus, modLate, sortVersions, isGoMs, findGoMs
 } from '../src/core/versions.js';
 
 // node 环境无全局 localStorage（save 内部 try/catch 也兜底，这里显式提供）
@@ -468,5 +468,36 @@ describe('版本：界面接入契约（新增视图要同步的注册点）', (
     const src = fs.readFileSync(fileURLToPath(new URL('../src/views/index.js', import.meta.url)), 'utf8');
     expect(src).toMatch(/view === 'arch' \|\| view === 'work' \|\| view === 'version'/);
     expect(src).toMatch(/renderVersionView\(gantt, full\)/);
+  });
+});
+
+describe('versions: 上线里程碑识别（isGoMs / findGoMs）', () => {
+  it('p === go 的里程碑算上线', () => {
+    expect(isGoMs({ m: '2026-09-09', p: 'go' })).toBe(true);
+  });
+
+  it('没有 p 字段但 label 含「上线」也算（默认/历史数据的形状）', () => {
+    expect(isGoMs({ m: '2026-09-09', label: '9/9 上线' })).toBe(true);
+    expect(isGoMs({ m: '2026-11-13', label: '整体上线' })).toBe(true);
+  });
+
+  it('非里程碑、或无上线语义的里程碑都不算', () => {
+    expect(isGoMs({ s: '2026-09-01', e: '2026-09-05', p: 'go' })).toBe(false);  // 没有 m，不是里程碑
+    expect(isGoMs({ m: '2026-09-09', p: 'sit', label: '提测' })).toBe(false);
+    expect(isGoMs(null)).toBe(false);
+  });
+
+  it('findGoMs 取最后一个上线里程碑', () => {
+    const mo = { name: 'A', bars: [
+      { id: 'x', m: '2026-09-09', label: '9/9 上线' },
+      { id: 'y', m: '2026-11-13', p: 'go', label: '上线' }
+    ] };
+    expect(findGoMs(mo).id).toBe('y');
+  });
+
+  it('找不到时返回 null', () => {
+    expect(findGoMs({ name: 'A', bars: [{ id: 'x', m: '2026-09-09', p: 'sit', label: '提测' }] })).toBe(null);
+    expect(findGoMs({ name: 'A' })).toBe(null);
+    expect(findGoMs(null)).toBe(null);
   });
 });

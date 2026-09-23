@@ -97,6 +97,25 @@ export function versionProgress(v, state, workday) {
   return { work, done, pct: work ? Math.round(done / work * 10000) / 100 : 0 };
 }
 
+// 该需求的「上线」里程碑（多个取最后一个，与 addModule 的创建顺序一致）。
+//
+// ⚠️ 不能只认 p === 'go'：默认数据与历史数据里的上线里程碑是 `{ m:'2026-09-09', label:'9/9 上线' }`，
+// **没有 p 字段**（阶段色靠 `PCOL[b.p] || PCOL.go` 兜底，一直没人注意）。
+// 只按 p 找会"找不到 → 补建一个"，于是每加入一次版本就凭空多出一个「上线」菱形。
+// 故按「p === 'go' 或 label 里含上线」识别：这条口径同时覆盖默认数据里的"11/13 整体上线"。
+// 从 scheduler/mutations.js 搬来：需求台账读「计划上线日」必须与版本钉日期用同一口径。
+export function isGoMs(b) {
+  if (!b || !b.m) return false;
+  if (b.p === 'go') return true;
+  return /上线/.test(String(b.label || ''));
+}
+
+export function findGoMs(mo) {
+  let ms = null;
+  ((mo && mo.bars) || []).forEach(b => { if (isGoMs(b)) ms = b; });
+  return ms;
+}
+
 // 「赶不上」判定：需求排得最晚的普通任务晚于版本上线日 → 返回 {days, end}，否则 null。
 //   1) 待排期（unscheduled）需求不参与：它的日期本来就不可信，不该拿来报警
 //   2) 没有普通任务（空需求）不参与判定

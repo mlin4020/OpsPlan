@@ -11,7 +11,7 @@ import { F } from './planning.js';
 import { fmt, addDays } from '../core/dates.js';
 import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority } from '../core/default-data.js';
 import { milestoneName } from '../core/mod-tag.js';
-import { newVersionId, versionOfMap } from '../core/versions.js';
+import { newVersionId, versionOfMap, isGoMs, findGoMs } from '../core/versions.js';
 import { userStore } from '../store/user-store.js';
 
 // 只读守卫：编辑类入口统一从这里过（throw 语义用于"新增"类，其余静默 return）
@@ -453,24 +453,6 @@ export function createMutations(ctx) {
   };
   const findVersionRaw = id => versions().find(v => v && v.id === id) || null;
   const modByName = name => (getState().modules || []).find(m => m.name === name) || null;
-
-  // 该需求的「上线」里程碑（多个取最后一个，与 addModule 的创建顺序一致）。
-  //
-  // ⚠️ 不能只认 p === 'go'：默认数据与历史数据里的上线里程碑是 `{ m:'2026-09-09', label:'9/9 上线' }`，
-  // **没有 p 字段**（阶段色靠 `PCOL[b.p] || PCOL.go` 兜底，一直没人注意）。
-  // 只按 p 找会"找不到 → 补建一个"，于是每加入一次版本就凭空多出一个「上线」菱形，且旧的那个还挂在自动模式上。
-  // 故按「p === 'go' 或 label 里含上线」识别：这条口径同时覆盖默认数据里的"11/13 整体上线"。
-  function isGoMs(b) {
-    if (!b || !b.m) return false;
-    if (b.p === 'go') return true;
-    return /上线/.test(String(b.label || ''));
-  }
-
-  function findGoMs(mo) {
-    let ms = null;
-    (mo.bars || []).forEach(b => { if (isGoMs(b)) ms = b; });
-    return ms;
-  }
 
   // 把需求的上线日钉到 dateStr，返回被钉里程碑的 id（供级联重算用）。
   // 没有「上线」里程碑（自定义阶段时没建 / 被删过）→ 补建一个，依赖挂到该需求最后一个普通任务上，
