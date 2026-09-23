@@ -139,7 +139,7 @@ describe('renderWorkView: 按人汇总的任务清单', () => {
     expect(renderWorkView(null, ctx)).toContain(`<b>${assigned.length - archN}</b><span>人员任务</span>`);
   });
 
-  it('归档需求的任务整条不进清单（归档即收口，要看历史去「归档」页）', () => {
+  it('归档需求的任务整条不进清单（归档即收口，要看历史去「需求台账」页）', () => {
     const ctx = makeCtx();
     ctx.state.modules[0].archived = true;
     const archN = ctx.state.modules[0].bars.filter(b => !b.m).length;
@@ -157,7 +157,7 @@ describe('renderWorkView: 按人汇总的任务清单', () => {
     ctx.state.modules.forEach(m => { m.archived = true; });
     const html = renderWorkView(null, ctx);
     expect(html).toContain('只剩归档需求了');
-    expect(html).toContain('「归档」页');
+    expect(html).toContain('「需求台账」页');
     expect(html).not.toContain('还没有任何任务');
   });
 

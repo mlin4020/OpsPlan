@@ -1,7 +1,7 @@
 // 需求归档测试：归档是「软状态 + 渲染层过滤」
 //   1) 数据层：archiveModule 写入 archived/archivedAt，需求对象仍保留（导出/同步/撤销不丢数据）
 //   2) 排期：归档需求的任务仍参与依赖与资源计算（避免归档导致下游排期被静默改写）
-//   3) 渲染层：归档需求不出现在主视图，只在独立的「归档」页面（archive-view.js）只读展示
+//   3) 渲染层：归档需求不出现在主视图，只在「需求台账」页里按「只看已归档」筛选查看（req-view.js）
 import { describe, it, expect, beforeEach } from 'vitest';
 import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
@@ -10,7 +10,6 @@ import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { archivedModSet } from '../src/core/mod-tag.js';
 import { renderModView } from '../src/views/mod-view.js';
-import { renderArchiveView } from '../src/views/archive-view.js';
 import { F } from '../src/core/dates.js';
 
 // localStorage 兜底（node 环境无全局 localStorage；persistence.save 内部 try/catch 也能兜底）
@@ -161,13 +160,4 @@ describe('module-archive: 渲染层过滤与归档区', () => {
     expect(renderModView(null, makeRenderCtx(true), new Set())).not.toContain('mod-arch-head');
   });
 
-  it('归档需求在「归档」页面里以卡片形式可见，并带取消归档入口', () => {
-    makeSched();
-    planStore.state.modules.find(m => m.name === '官网改版').archived = true;
-    const html = renderArchiveView(null, makeRenderCtx(true));
-    expect(html).toContain('class="rmod-grid"');
-    expect(html).toContain('data-report-mod="官网改版"');
-    expect(html).toContain('data-unarchive="官网改版"');
-    expect(html).not.toContain('data-report-mod="数据看板"');   // 未归档的不出现
-  });
 });

@@ -24,19 +24,6 @@ export function updateProblemBadge(deps) {
   });
 }
 
-// 归档入口的数量徽标：让"归档里有没有东西"不点进去也能看见。
-// 归档是个独立页面，没有徽标的话入口很容易被忽略（这正是它原先埋在页底无人问津的原因）。
-export function updateArchiveBadge(deps) {
-  const modules = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || [];
-  const n = modules.filter(m => !!m.archived).length;
-  ['archNavCount', 'archNavCountM'].forEach(id => {
-    const badge = deps.getEl(id);
-    if (!badge) return;
-    badge.hidden = n === 0;
-    badge.textContent = n;
-  });
-}
-
 function locateTask(taskId, on, deps) {
   const el = deps.gantt ? deps.gantt.querySelector(`.bar[data-task-id="${taskId}"]`) : null;
   if (!el) return;
@@ -101,7 +88,6 @@ export function bindProblemDrawer(deps) {
   return {
     openProblemDrawer: () => openProblemDrawer(deps),
     renderProbList: () => renderProbList(deps),
-    updateProblemBadge: () => updateProblemBadge(deps),
-    updateArchiveBadge: () => updateArchiveBadge(deps)
+    updateProblemBadge: () => updateProblemBadge(deps)
   };
 }

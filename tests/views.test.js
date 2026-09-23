@@ -9,7 +9,6 @@ import { resolveModuleColors, nextModuleColor, resolveChosenColor, MODULE_PALETT
 import { priorityBadge } from '../src/views/badge.js';
 import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
-import { renderArchiveView } from '../src/views/archive-view.js';
 import { renderModDetailRows } from '../src/views/mod-card.js';
 import { renderReqView, toggleReqExpanded } from '../src/views/req-view.js';
 
@@ -289,68 +288,6 @@ describe('views: 总览（report）不再挂归档区', () => {
     ctx.archOpen = true;
     const html = renderReportView(null, ctx);
     expect(html).not.toContain('data-report-mod="官网改版"');
-  });
-});
-
-describe('views: 归档需求页面（档案柜）', () => {
-  it('无归档需求时给空态与下一步指引，不渲染任何卡片', () => {
-    const ctx = makeCtx();
-    const html = renderArchiveView(null, ctx);
-    expect(html).toContain('arch-empty');
-    expect(html).toContain('暂无归档需求');
-    expect(html).not.toContain('class="rmod-card"');
-  });
-
-  it('复用总览的需求进度卡片（同一份 DOM），带下钻所需的 data-report-mod', () => {
-    const ctx = makeCtx();
-    ctx.state.modules[0].archived = true;   // 官网改版
-    ctx.state.modules[1].archived = true;   // 数据看板（带 P1）
-    const html = renderArchiveView(null, ctx);
-    expect(html).toContain('class="rmod-grid"');
-    expect((html.match(/class="rmod-card"/g) || []).length).toBe(2);
-    expect(html).toContain('data-report-mod="官网改版"');
-    // 卡片自带的状态块 / 优先级徽标一起带过来（下钻由 toolbar 里 .rmod-card 的委托接管）
-    expect(html).toContain('rmod-idx');
-    expect(html).toContain('class="pri pri-p1"');
-    // 未归档的需求不得出现在这页
-    expect(html).not.toContain('data-report-mod="移动端适配"');
-  });
-
-  it('每张卡片补一个「M/D 归档」标记（总览卡片没有这个字段）', () => {
-    const ctx = makeCtx();
-    ctx.state.modules[0].archived = true;
-    ctx.state.modules[0].archivedAt = '2026-09-18T02:00:00.000Z';
-    // 按本地时区渲染，断言格式而非具体日期（否则测试会随运行环境时区飘）
-    expect(renderArchiveView(null, ctx)).toMatch(/class="rmod-at"[^>]*>\d{1,2}\/\d{1,2} 归档</);
-  });
-
-  it('归档时间为空 / 非法时不渲染该标记，不输出占位符', () => {
-    const ctx = makeCtx();
-    ctx.state.modules[0].archived = true;
-    ctx.state.modules[0].archivedAt = 'not-a-date';
-    expect(renderArchiveView(null, ctx)).not.toContain('class="rmod-at"');
-  });
-
-  it('按归档时间倒序：最近收口的排最前，缺失归档时间的排最后', () => {
-    const ctx = makeCtx();
-    const [a, b, c] = ctx.state.modules;      // 官网改版 / 数据看板 / 移动端适配
-    a.archived = true; a.archivedAt = '2026-09-01T00:00:00.000Z';
-    b.archived = true; b.archivedAt = '2026-09-18T00:00:00.000Z';
-    c.archived = true;                        // 没有 archivedAt
-    const html = renderArchiveView(null, ctx);
-    const pos = n => html.indexOf(`data-report-mod="${n}"`);
-    expect(pos(a.name)).toBeGreaterThan(-1);
-    expect(pos(b.name)).toBeLessThan(pos(a.name));   // b 最新 → 最前
-    expect(pos(a.name)).toBeLessThan(pos(c.name));   // c 无时间 → 最后
-  });
-
-  it('取消归档是右上角小图标，带 data-unarchive（复用 drawers.js 的既有委托）', () => {
-    const ctx = makeCtx();
-    ctx.state.modules[0].archived = true;
-    const html = renderArchiveView(null, ctx);
-    expect(html).toContain('rmod-unarch');
-    expect(html).toContain('data-unarchive="官网改版"');
-    expect(html).toContain('取消归档');
   });
 });
 

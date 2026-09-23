@@ -274,7 +274,7 @@ export function renderReportView(container, ctx) {
   const modRows = mods.map(mo => renderModCard(mo, ctx, { isExpanded: n => reportExpanded.has(n) })).join('');
 
   // 已归档需求不再挂在本页底部（原先要滚到最底才能看到），
-  // 改为独立页面：顶部「归档」入口 → archive-view.js
+  // 改为独立入口：顶部的「需求台账」页里按「只看已归档」筛选 → req-view.js
 
   // ---- 4. 里程碑一览 ----
   const mileList = mss.length ? mss.map(t => {

@@ -14,7 +14,7 @@
 // ============================================================
 import { openModContextMenu, openResContextMenu, openTaskContextMenu } from './menu-actions.js';
 import { openTaskDrawer } from './task-drawer.js';
-import { updateArchiveBadge, updateProblemBadge } from './problem-drawer.js';
+import { updateProblemBadge } from './problem-drawer.js';
 
 // 行级拖动排序状态（同一时刻只可能有一个）
 let rowDrag = null;
@@ -252,8 +252,6 @@ export function bindGanttInteractions(deps) {
   // 否则拖拽结束 / 保存后鼠标没动，高亮却消失了
   paintModHover(g, hoverMod);
   updateProblemBadge(deps);
-  // 归档数量徽标与问题徽标一样按渲染刷新：归档 / 取消归档后立即反映在入口上
-  updateArchiveBadge(deps);
 }
 
 // 一次性绑定（委托在甘特容器上，容器不随重绘更换）

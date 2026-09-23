@@ -287,7 +287,7 @@ export function renderWorkView(container, ctx) {
         <div class="arch-empty">
           ${archN
             ? `<b>只剩归档需求了</b>
-          <span>还有 ${archN} 项任务属于已归档需求，本页不再列出<br>要看它们去顶部的「归档」页；新建需求请去甘特图</span>`
+          <span>还有 ${archN} 项任务属于已归档需求，本页不再列出<br>要看它们去顶部的「需求台账」页并按「只看已归档」筛选；新建需求请去甘特图</span>`
             : `<b>还没有任何任务</b>
           <span>在甘特图里新建需求并添加任务，任务排上人之后就会出现在这里</span>`}
         </div>
