@@ -1,12 +1,15 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0e7490">
 <title>OpsPlan · 排期管理平台</title>
-<script src="lib/supabase.js"></script>
-<script src="supabase-config.js"></script>
+<!-- 后端配置：feishu-config.js 中 enabled:true 时走飞书，否则走 Supabase -->
+<script src="feishu-config.js" onerror="void 0"></script>
+<!-- Supabase 客户端（UMD）与连接配置；缺失时页面会给出「未配置 Supabase」提示 -->
+<script src="lib/supabase.js" onerror="void 0"></script>
+<script src="supabase-config.js" onerror="void 0"></script>
 <style>
 :root{--ink:#0f1729;--muted:#64748b;--line:#e2e8f0;--bg:#eef1f7;--accent:#0e7490;--accent-strong:#0a566b;--accent-soft:#eaf7fa;--accent-line:#c1e6f0;--accent-ink:#094758;--accent-ring:rgba(14,116,144,.18);--hero:#0e7490;--hero-deep:#041a20;--hero-soft:#d2edf4;--blue:var(--accent);--red:#ef4444;--amber:#f59e0b;--shadow:0 8px 30px rgba(15,23,42,.10)}
 *{margin:0;padding:0;box-sizing:border-box}

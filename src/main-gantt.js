@@ -20,6 +20,7 @@ import { buildShellHTML, showFullLoading } from './components/shell.js';
 import { renderAll, buildViewCtx, toggleReportExpanded } from './views/index.js';
 import { restoreTheme } from './utils/theme.js';
 import { initSupabase } from './services/supabase.js';
+import { isFeishuEnabled } from './services/backend.js';
 import { getSession, getUser, getProfile } from './services/auth.js';
 import { getProject } from './services/projects.js';
 import { createPlanSync } from './services/plan-sync.js';
@@ -60,11 +61,11 @@ function boot() {
   }
   showLoading();
 
-  // 数据访问：初始化 supabase client（未配置则提示并终止）
-  const client = initSupabase();
-  if (!client) {
+  // 数据访问：Supabase 模式下初始化 client（未配置则提示并终止）；
+  // 飞书模式由 bridge 提供数据，不依赖 Supabase client，不能在这里卡住。
+  if (!isFeishuEnabled() && !initSupabase()) {
     hideLoading();
-    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#eef1f7;color:#64748b;font-family:sans-serif;flex-direction:column;gap:8px"><div style="font-size:15px;font-weight:600;color:#334155">未配置 Supabase</div><div style="font-size:12px">请在 supabase-config.js 中填写 Project URL 与 anon key</div></div>';
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#eef1f7;color:#64748b;font-family:sans-serif;flex-direction:column;gap:8px"><div style="font-size:15px;font-weight:600;color:#334155">未配置 Supabase</div><div style="font-size:12px">请在 supabase-config.js 中填写 Project URL 与 anon key，或在 feishu-config.js 中开启 enabled 使用飞书后端</div></div>';
     return;
   }
 
@@ -229,10 +230,8 @@ function boot() {
 // 动态加载 Supabase UMD 与配置脚本（gantt.html 未显式引入，需在此确保就绪）。
 // 幂等：已在 head 注入则跳过；返回 Promise，脚本全部加载完成后 resolve（失败也 resolve，由 boot 内处理未配置提示）。
 function ensureSupabaseScripts() {
-  const needed = [
-    { id: 'supabase-umd', src: 'lib/supabase.js' },
-    { id: 'supabase-config', src: 'supabase-config.js' }
-  ];
+  // 飞书模式不需要 Supabase 客户端：直接跳过，避免多打两个无效请求
+  if (isFeishuEnabled()) return Promise.resolve();
   const existing = () => !!(window.supabase && window.SUPABASE_CONFIG);
   if (existing()) return Promise.resolve();
   const load = src => new Promise(resolve => {
