@@ -12,7 +12,7 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, milestoneName, moduleTag, currentPhase } from '../core/mod-tag.js';
+import { computeModulePer, milestoneName, moduleTag, currentPhase, progressDeviation } from '../core/mod-tag.js';
 import { versionOfMod } from '../core/versions.js';
 import { modStats } from '../core/mod-stats.js';
 import { priorityBadge, versionBadge } from './badge.js';
@@ -85,9 +85,10 @@ export function renderModCard(mo, ctx, opts = {}) {
   const { tag: autoTag, tagc: autoTagc } = moduleTag(mo, today);
   const autoPer = computeModulePer(bars, state.resources);
   const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, ctx);
-  const devi = Math.round((mp - planPct) * 10) / 10;
-  const st = (!rng || !mWork) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
-  const stTxt = st === 'late' ? `延后${Math.abs(devi).toFixed(0)}%` : (st === 'ahead' ? `超前${devi.toFixed(0)}%` : '');
+  // 偏差口径集中在 core/mod-tag.js，三处视图共用（含"已完成不报偏差"这条）
+  const dev = progressDeviation(bars, { pct: mp, done: mDone, work: mWork, planPct });
+  const st = (rng && mWork) ? dev.key : '';
+  const stTxt = dev.label;
   // 今日在需求时间范围内的位置（用于今日线 / 应达基线）
   const modStart = rng ? rng.start.getTime() : 0;
   const modSpan = rng ? (rng.end.getTime() - modStart || 864e5) : 1;

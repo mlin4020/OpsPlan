@@ -136,6 +136,32 @@ export function computePlanPct(bars, today, workday) {
 }
 
 /**
+ * 进度偏差：用「完成度（EV）」减「应达（PV）」，并给出给读者看的措辞。
+ *
+ * 三处视图（总览卡片 / 排期总览 / 需求台账）原本各写一份同样的判定，措辞还略有出入，
+ * 抽到这里统一——尤其下面这条规则必须三处一致，否则会出现自相矛盾的组合。
+ *
+ * ⚠️ 已 100% 完成的需求**不再给偏差**。此时「超前 5%」的真实含义只是
+ * 「计划把最后 1 人日排在明天到期」，而需求交付早已是终态：对读者只有干扰，
+ * 「已完成」这个标签本身就说清了。判定口径与 computeModuleTag 的 allDone 对齐。
+ *
+ * @param {Array} bars 需求内的任务条（内部过滤里程碑）
+ * @param {{pct:number,done:number,work:number,planPct:number}} stats modStats 的返回值
+ * @returns {{key:'late'|'ahead'|'on'|'', label:string, value:number, finished:boolean}}
+ *   key 供样式类名使用（'' 表示不标注）；label 是可直接展示的文案（无常量前缀）
+ */
+export function progressDeviation(bars, stats) {
+  const { pct = 0, work = 0, planPct = 0 } = stats || {};
+  const tasks = (bars || []).filter(b => !b.m);
+  const finished = tasks.length > 0 && tasks.every(b => (b.done || 0) >= 100);
+  if (finished || !work) return { key: '', label: '', value: 0, finished };
+  const value = Math.round((pct - planPct) * 10) / 10;
+  if (value < -0.5) return { key: 'late', label: `延后 ${Math.abs(value).toFixed(0)}%`, value, finished: false };
+  if (value > 0.5) return { key: 'ahead', label: `超前 ${value.toFixed(0)}%`, value, finished: false };
+  return { key: 'on', label: '', value, finished: false };
+}
+
+/**
  * 从需求内任务的实际人员分配中，按角色统计人数
  * 返回格式：如 "需求×2 + 开发×3 + 测试"
  */

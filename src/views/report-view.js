@@ -5,7 +5,7 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, moduleTag } from '../core/mod-tag.js';
+import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, moduleTag, progressDeviation } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
 import { priorityBadge } from './badge.js';
 // 需求进度卡片与 modStats/msName 已抽到 mod-card.js，与「归档需求」页共用同一份实现
@@ -106,9 +106,10 @@ export function renderReportView(container, ctx) {
     // 需求进度计算（复用需求进度卡片的逻辑）
     const bars = mo.bars || [];
     const { work: mWork, done: mDone, pct: mp, planPct } = modStats(bars, ctx);
-    const devi = Math.round((mp - planPct) * 10) / 10;                 // 偏差：实际完成 - 今日应达
-    const st = (!rng || !mWork) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
-    const stTxt = st === 'late' ? ` · 延后 ${Math.abs(devi).toFixed(0)}%` : (st === 'ahead' ? ` · 超前 ${devi.toFixed(0)}%` : '');
+    // 偏差口径集中在 core/mod-tag.js，三处视图共用（含"已完成不报偏差"这条）
+    const dev = progressDeviation(bars, { pct: mp, done: mDone, work: mWork, planPct });
+    const st = (rng && mWork) ? dev.key : '';
+    const stTxt = dev.label ? ` · ${dev.label}` : '';
     // 进度填充色：正常/超前=标准绿(green-600)，延期=标准红(red-600)；条底色由CSS统一控制
     // 对比度：空条与轨道背景差异明显，填充色与空条对比度>4.5:1，完全解决与背景融合问题
     const fillColor = st === 'late' ? '#dc2626' : '#16a34a';

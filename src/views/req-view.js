@@ -15,7 +15,7 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { moduleTag, currentPhase, computeModulePer } from '../core/mod-tag.js';
+import { moduleTag, currentPhase, computeModulePer, progressDeviation } from '../core/mod-tag.js';
 import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
 import { filterMods, sortMods } from '../core/mod-query.js';
 import { modStats, renderModDetailRows } from './mod-card.js';
@@ -97,12 +97,12 @@ function rowHtml(mo, ctx) {
   const ver = versionOfMod(ctx.state, mo.name);
   const rng = mo.unscheduled ? null : ctx.modRange(mo);
   const st = modStats(mo.bars, ctx);
-  // 偏差与总览卡片同口径（EV − PV，即"实际完成度 − 计划应达"）；
+  // 偏差与总览卡片 / 排期总览同口径（EV − PV），判定集中在 core/mod-tag.js 的 progressDeviation
+  // （含"已完成不报偏差"这条，三处必须一致）；
   // 无排期需求不判偏差（日期本身不可信），进度条也就不变色
-  const devi = st.work ? Math.round((st.pct - st.planPct) * 10) / 10 : 0;
-  const stCls = (!rng || !st.work) ? '' : (devi < -0.5 ? 'late' : (devi > 0.5 ? 'ahead' : 'on'));
-  const deviTxt = stCls === 'late' ? `延后 ${Math.abs(devi).toFixed(0)}%`
-    : (stCls === 'ahead' ? `超前 ${devi.toFixed(0)}%` : '');
+  const dev = progressDeviation(mo.bars, st);
+  const stCls = rng ? dev.key : '';
+  const deviTxt = rng ? dev.label : '';
   const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
 
   return `<tr class="req-row" data-req-row="${esc(mo.name)}">
@@ -175,8 +175,9 @@ function detailHtml(mo, ctx) {
   const desc = (mo.desc || '').trim();
   const docUrl = safeDocUrl(mo.docUrl);
   const per = computeModulePer(mo.bars || [], ctx.state.resources);
-  const devi = st.work ? Math.round((st.pct - st.planPct) * 10) / 10 : 0;
-  const deviTxt = !st.work ? '' : (devi < -0.5 ? `延后 ${Math.abs(devi).toFixed(0)}%` : (devi > 0.5 ? `超前 ${devi.toFixed(0)}%` : '按计划'));
+  const dev = progressDeviation(mo.bars, st);
+  // 展开区是"细读"场景，措辞要给全：已完成的需求不报偏差，直接说「已完成」
+  const deviTxt = !st.work ? '' : (dev.finished ? '已完成' : (dev.label || '按计划'));
 
   return `<tr class="req-detail-tr"><td colspan="9">
     <div class="req-detail">

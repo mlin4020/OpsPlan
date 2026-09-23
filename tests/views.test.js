@@ -559,6 +559,21 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('延后');
     expect(html).toContain('<i class="late"');   // 进度条填充转红
   });
+
+  it('已完成的需求不再报偏差（回归：100% 却标「超前」）', () => {
+    const ctx = makeReqCtx();                       // today = 2026-08-20
+    // 复现「县域银保」的形状：活全干完了（EV 100%），但计划把最后 1 人日
+    // 排到 12/1 才到期 → PV 只有 83.3%，旧实现会打出「超前 17%」，
+    // 与同一行的「已完成」标签自相矛盾。
+    ctx.state.modules[0].bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-07', w: 5, done: 100, res: [] }, // 已到期且完成
+      { id: 'b', p: 'go', s: '2026-12-01', e: '2026-12-01', w: 1, done: 100, res: [] }   // 未到期但已完成
+    ];
+    const html = renderReqView(null, ctx);
+    expect(html).not.toContain('req-devi');         // 不渲染偏差标记
+    expect(html).not.toContain('超前');
+    expect(html).toContain('100% · 6.0/6 人日');    // 完成度照常展示
+  });
 });
 
 describe('views: 需求台账展开档案', () => {
