@@ -7,7 +7,7 @@
 //
 //   drawer-shell.js        抽屉外壳：面板状态（openPanel）/ 关闭 / 移动端下拉手势
 //   task-drawer.js         任务详情抽屉：表单 / 资源分配 / 前置依赖 / 控件绑定
-//   problem-drawer.js      排期问题抽屉 + 问题徽标 + 归档徽标
+//   problem-drawer.js      排期问题抽屉 + 问题徽标
 //   menu-actions.js        右键菜单的动作分发（会改数据：新建/编辑/删除/归档/折叠）
 //   gantt-interactions.js  重绘后的甘特交互：tip / 折叠 / 行排序 / 任务条 / 悬浮联动
 //

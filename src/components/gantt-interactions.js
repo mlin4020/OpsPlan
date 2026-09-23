@@ -221,7 +221,7 @@ export function bindGanttInteractions(deps) {
     });
   });
   // 甘特图底部归档区（只读）：标题行点击展开/收起
-  // 展开态放 viewState.archOpen：只影响这一处（独立归档页的卡片展开走 reportExpanded）
+  // 展开态放 viewState.archOpen：只影响这一处（总览卡片与需求台账各自持有自己的展开态）
   g.querySelectorAll('[data-arch-head]').forEach(el => {
     el.addEventListener('click', () => {
       deps.viewState.archOpen = !deps.viewState.archOpen;

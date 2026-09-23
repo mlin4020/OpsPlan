@@ -394,6 +394,21 @@ describe('views: renderAll 横向滚动位置保持', () => {
     renderAll(ctxFor(gantt, gsc, { scrollLeft: 1200 }));
     expect(gsc.scrollLeft).toBe(1200);
   });
+
+  it('view=req 走整页文档分支：渲染台账表格、宽度 100%、加 report-mode', () => {
+    const { gantt, gsc } = shell(0);
+    const ctx = ctxFor(gantt, gsc, { view: 'req' });
+    ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-09-09', shipped: false, shippedAt: null, mods: ['官网改版'] }];
+    ctx.reqFilter = { kw: '', status: 'all', pri: 'all', ver: 'all', scope: 'all', unscheduled: 'all' };
+    ctx.reqSort = { key: 'order', dir: 'asc' };
+    let reportMode = false;
+    gantt.classList.add = cls => { if (cls === 'report-mode') reportMode = true; };
+    renderAll(ctx);
+    expect(gantt.innerHTML).toContain('class="req-table"');
+    expect(gantt.innerHTML).toContain('data-req-row=');
+    expect(gantt.style.width).toBe('100%');
+    expect(reportMode).toBe(true);
+  });
 });
 
 describe('views: renderModDetailRows 需求阶段明细', () => {
