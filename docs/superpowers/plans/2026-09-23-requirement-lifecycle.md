@@ -716,8 +716,11 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     toggleReqExpanded('官网改版');
     const html = renderReqView(null, ctx);
     toggleReqExpanded('官网改版');
-    expect(html).toContain('8/24');
-    expect(html).not.toContain('8/17');
+    // 只在「提出与生命周期」小节内断言：整页里 8/17 是 SIT 任务自己的日期（阶段明细 / 排期都会渲染），
+    // 对整页断言 not.toContain('8/17') 会把正确实现判成失败（执行时已修正）
+    const sec = html.slice(html.indexOf('data-req-sec="propose"'), html.indexOf('data-req-sec="desc"'));
+    expect(sec).toContain('8/24');       // 提测 = 提测里程碑
+    expect(sec).not.toContain('8/17');   // 而不是 SIT 任务的开始日
   });
 ```
 
