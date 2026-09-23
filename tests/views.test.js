@@ -11,6 +11,7 @@ import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
 import { renderArchiveView } from '../src/views/archive-view.js';
 import { renderModDetailRows } from '../src/views/mod-card.js';
+import { renderReqView, toggleReqExpanded } from '../src/views/req-view.js';
 
 // 构造最小渲染 ctx（与 renderAll 的 buildViewCtx 契约对齐）
 function makeCtx() {
@@ -485,5 +486,75 @@ describe('views: renderModDetailRows 需求阶段明细', () => {
   it('空需求返回空串（台账展开区据此不渲染该段）', () => {
     expect(renderModDetailRows({ name: 'X', bars: [] }, makeCtx())).toBe('');
     expect(renderModDetailRows({ name: 'X' }, makeCtx())).toBe('');
+  });
+});
+
+// 台账渲染需要一个带 versions / reqFilter / reqSort 的 ctx
+function makeReqCtx() {
+  const ctx = makeCtx();
+  ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-09-09', shipped: false, shippedAt: null, mods: ['官网改版'] }];
+  ctx.reqFilter = { kw: '', status: 'all', pri: 'all', ver: 'all', scope: 'all', unscheduled: 'all' };
+  ctx.reqSort = { key: 'order', dir: 'asc' };
+  return ctx;
+}
+
+describe('views: 需求台账主行表格', () => {
+  it('渲染表头列与容器类', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toContain('req-wrap');
+    expect(html).toContain('class="req-table"');
+    ['需求', '状态', '描述', '文档', '所属版本', '排期', '进度', '上线情况', '操作']
+      .forEach(h => expect(html).toContain(h));
+  });
+
+  it('标题区给出全量与筛选后计数', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toMatch(/共 \d+ 个需求/);
+  });
+
+  it('默认展示全部需求（含待排期与归档），归档行带标记', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[1].archived = true;
+    ctx.state.modules[2].unscheduled = true;
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('data-req-row="官网改版"');
+    expect(html).toContain('data-req-row="数据看板"');
+    expect(html).toContain('data-req-row="移动端适配"');
+    expect(html).toContain('req-badge-arch');
+    expect(html).toContain('待排期');
+  });
+
+  it('未填写描述与文档时显示占位符，不留空白', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toContain('req-desc');
+    expect(html).toContain('req-doc-empty');
+  });
+
+  it('筛选后计数反映筛选结果', () => {
+    const ctx = makeReqCtx();
+    ctx.reqFilter = { ...ctx.reqFilter, kw: '看板' };
+    const html = renderReqView(null, ctx);
+    expect(html).not.toContain('data-req-row="官网改版"');
+    expect(html).toContain('data-req-row="数据看板"');
+  });
+
+  it('无命中时给空态与重置入口', () => {
+    const ctx = makeReqCtx();
+    ctx.reqFilter = { ...ctx.reqFilter, kw: '不存在的需求' };
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('arch-empty');
+    expect(html).toContain('data-req-reset');
+  });
+
+  it('操作列与新建按钮带 req-act（只读时靠 CSS 隐藏）', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toMatch(/<th[^>]*class="[^"]*req-act/);
+    expect(html).toMatch(/class="btn primary req-act" data-req-new/);
+  });
+
+  it('上线情况列区分「未加入版本」与版本状态', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toContain('未加入版本');   // 数据看板 / 移动端适配均无版本
+    expect(html).toContain('V2.3');        // 官网改版有版本
   });
 });
