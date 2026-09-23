@@ -12,26 +12,19 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, computePlanPct, milestoneName, moduleTag, currentPhase } from '../core/mod-tag.js';
+import { computeModulePer, milestoneName, moduleTag, currentPhase } from '../core/mod-tag.js';
 import { versionOfMod } from '../core/versions.js';
+import { modStats } from '../core/mod-stats.js';
 import { priorityBadge, versionBadge } from './badge.js';
 
 // 里程碑名里若自带前导日期（默认数据形如 "9/9 上线"），剥掉它，
 // 避免与外部已单独显示的日期拼成 "9/9 9/9 上线"
 export const msName = (b, modName) => milestoneName(b, modName).replace(/^\d{1,2}\/\d{1,2}\s*/, '');
 
-// 需求级统计：人日口径的完成度 + 时间口径的应达基线
-export function modStats(bars, rng, ctx) {
-  const { workday, today } = ctx;
-  const tasks = (bars || []).filter(b => !b.m && b.s && b.e);
-  const work = tasks.reduce((a, b) => a + workday.workDays(b.s, b.e), 0);
-  const done = tasks.reduce((a, b) => a + workday.workDays(b.s, b.e) * ((b.done || 0) / 100), 0);
-  return {
-    work, done,
-    pct: work ? Math.round((done / work * 100) * 100) / 100 : 0,
-    planPct: computePlanPct(rng, today)
-  };
-}
+// 需求级统计已下沉 core（台账页要在 core 层按完成度排序时用到），此处转出以保持既有调用方不变。
+// 注意：必须是先 import 再 export —— `export { x } from '...'` 只是转发，不会在本模块建立绑定，
+// 而 renderModCard 内部要调用 modStats，用转发式写法会直接 ReferenceError。
+export { modStats };
 
 // 归档时间（ISO 字符串）→ 「M/D 归档」；解析失败或缺失返回空串
 export function archivedAtText(v) {

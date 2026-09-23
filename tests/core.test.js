@@ -8,6 +8,7 @@ import {
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
 import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag, currentPhase } from '../src/core/mod-tag.js';
+import { modStats } from '../src/core/mod-stats.js';
 import { isOverdueTask } from '../src/core/task-status.js';
 import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
@@ -416,5 +417,44 @@ describe('core: currentPhase 需求当前阶段', () => {
 
   it('没有任务 → 已全部完成（与卡片既有行为一致）', () => {
     expect(currentPhase({ name: 'A', bars: [] }, today)).toBe('已全部完成');
+  });
+});
+
+describe('core: modStats 需求级进度（人日口径）', () => {
+  const today = F('2026-08-20');
+  const ctx = {
+    today,
+    // 简算人日：含首尾的日历日（真实实现会跳过节假日，这里只验证加权口径）
+    workday: { workDays: (s, e) => Math.round((F(e) - F(s)) / 864e5) + 1 }
+  };
+
+  it('按人日加权：完成度 = 已完成人日 / 总人日', () => {
+    const bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-10', done: 100 },   // 10 人日全完成
+      { id: 'b', p: 'sit', s: '2026-08-11', e: '2026-08-20', done: 0 }      // 10 人日未开始
+    ];
+    const r = modStats(bars, { start: F('2026-08-01'), end: F('2026-08-20') }, ctx);
+    expect(r.work).toBe(20);
+    expect(r.done).toBe(10);
+    expect(r.pct).toBe(50);
+  });
+
+  it('里程碑不计入人日', () => {
+    const bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-10', done: 100 },
+      { id: 'm', m: '2026-08-20', p: 'go', label: '上线' }
+    ];
+    expect(modStats(bars, { start: F('2026-08-01'), end: F('2026-08-20') }, ctx).work).toBe(10);
+  });
+
+  it('没有可算的任务时 pct 为 0（不出现 NaN）', () => {
+    expect(modStats([], null, ctx).pct).toBe(0);
+  });
+
+  it('planPct 来自需求时间范围走过的比例', () => {
+    // 8/1 ~ 8/21 共 20 天，今天 8/20 → 走过 19/20 = 95%
+    const r = modStats([{ id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-21', done: 0 }],
+      { start: F('2026-08-01'), end: F('2026-08-21') }, ctx);
+    expect(r.planPct).toBe(95);
   });
 });
