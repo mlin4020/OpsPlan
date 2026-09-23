@@ -14,7 +14,7 @@
 // 它是界面临时状态，不该进 planStore（否则污染导出 / 同步 / 撤销）。
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
-import { PCOL, PNAME } from '../core/default-data.js';
+import { PCOL, PNAME, MODULE_LIFECYCLE } from '../core/default-data.js';
 import { moduleTag, currentPhase, computeModulePer, progressDeviation, findGateMs } from '../core/mod-tag.js';
 import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
 import { filterMods, sortMods } from '../core/mod-query.js';
@@ -186,6 +186,9 @@ function filterBar(filter, versions, total, shown) {
     </select>
     <select class="req-f" data-req-f="pri">
       ${['all', 'P0', 'P1', 'P2', 'P3', 'none'].map(v => opt(v, v === 'all' ? '全部优先级' : (v === 'none' ? '未设置' : v), filter.pri)).join('')}
+    </select>
+    <select class="req-f" data-req-f="lifecycle">
+      ${['all', ...MODULE_LIFECYCLE, 'none'].map(v => opt(v, v === 'all' ? '全部生命周期' : (v === 'none' ? '未设置' : v), filter.lifecycle)).join('')}
     </select>
     <select class="req-f" data-req-f="ver">${verOpts}</select>
     <select class="req-f" data-req-f="scope">

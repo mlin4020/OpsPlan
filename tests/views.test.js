@@ -814,4 +814,12 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect(html).not.toContain('req-gate');
     expect(html).toContain('req-muted">—');
   });
+
+  it('筛选条有生命周期下拉，含四档选项与「未设置」', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toContain('data-req-f="lifecycle"');
+    ['全部生命周期', '待确认', '已确认', '已提测', '已上线']
+      .forEach(t => expect(html).toContain(`>${t}</option>`));
+    expect(html).toContain('>未设置</option>');   // 老数据的"未设置"必须能被单独筛出来
+  });
 });
