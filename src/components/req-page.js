@@ -70,7 +70,11 @@ export function bindReqPage(deps) {
     if (!t || !t.closest) return;
 
     // ---- 只读模式下也要能用的：展开 / 收起、排序、重置 ----
-    const row = t.closest('[data-req-row]');
+    // ⚠ 行内操作按钮（编辑 / 归档 / 删除）就在 <tr data-req-row> 内部，
+    //    所以展开判定必须先排除它们：否则 closest('[data-req-row]') 先命中，
+    //    "点编辑"会被当成"展开 / 收起"，四个行操作全部失效（回归见 tests/req-page.test.js）。
+    const hitAct = !!(t.closest('[data-req-edit]') || t.closest('[data-req-archive]') || t.closest('[data-req-del]'));
+    const row = hitAct ? null : t.closest('[data-req-row]');
     if (row) { toggleExpand(row.dataset.reqRow); return; }
 
     const sortTh = t.closest('[data-req-sort]');
