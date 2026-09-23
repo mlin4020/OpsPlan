@@ -509,11 +509,10 @@ body.req-view [data-report-hide]:not(.stats){display:none}
 .gbody .mod-arch-row .arch-unbtn{position:sticky;left:calc(var(--mname-w) - 18px);z-index:60;flex:none;align-self:center;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:12px;line-height:1;color:#fff;background:#94a3b8;border-radius:5px;cursor:pointer;opacity:.85;transition:background .15s,opacity .15s;box-shadow:0 1px 3px rgba(15,23,42,.18);margin-right:-18px;pointer-events:auto}
 .gbody .mod-arch-row .arch-unbtn:hover{background:var(--blue);opacity:1}
 
-/* ============ 归档需求页面（独立页面，由顶部「归档」入口进入） ============
-   原先归档挂在甘特图 / 总览的最底部，查看要一路滚到底；现改为独立页面 +
-   常驻入口（桌面视图切换组 / 手机底部标签栏），两者都无需滚动即可点到。
-   形态复用总览「需求进度」的卡片网格（.rmod-grid / .rmod-card），本页只加两处
-   归档专属元素：「M/D 归档」标记（.rmod-at）与右上角的「取消归档」小图标（.rmod-unarch）。 */
+/* ============ 空态与归档标记 ============
+   原「归档需求页面」的样式段。归档页已并入「需求台账」（views/req-view.js），
+   其中 .arch-empty 仍被台账与资源工作视图复用作空态容器，故保留；
+   .rmod-at / .rmod-unarch 是归档卡片的专属元素（卡片侧仍支持 archivedAt / actions 参数）。 */
 /* 归档时间：与排期区间（.rmod-range）都是日期但语义不同，用竖线隔开让它们可区分 */
 .rmod-at{flex:none;font-size:10px;color:#a3b1c2;border-left:1px solid #e2e8f0;padding-left:7px;margin-left:1px;white-space:nowrap}
 /* 取消归档：低频操作，做成右上角小图标（不占卡片文字位），hover 才提亮 */
@@ -838,6 +837,10 @@ body.work-view .msheet-item[data-zoom-only]{display:none}
   .ver-foot{flex-wrap:wrap}
   .ver-picker{max-height:190px}
   .ver-pick-item{padding:9px 8px}
+  /* 需求台账：窄屏隐藏两个宽文本列（描述 / 文档），其余靠容器横向滚动兜底 */
+  .req-col-opt{display:none}
+  .req-detail{grid-template-columns:1fr}
+  .req-q{width:100%}
 }
 
 /* ============================================================
@@ -897,6 +900,64 @@ body.readonly-mode .ver-act{display:none}
 .ver-pick-item.off{opacity:.55;cursor:not-allowed}
 .ver-pick-empty{padding:10px;font-size:12px;color:#94a3b8}
 .ver-modal-tip{margin:8px 0 0;font-size:11px;color:#94a3b8;line-height:1.6}
+
+/* ============================================================
+   需求台账页（.req-*）
+   与其它整页视图共用 .report-mode / .report-sec / .report-head 骨架，
+   这里只补表格自己的规则。容器比别的页宽：9 列在 1300px 下会过早出现横向滚动，
+   白白牺牲"横向对比"这个核心能力。
+   ============================================================ */
+.req-wrap{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.req-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.req-q{width:220px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-family:inherit}
+.req-f{padding:7px 8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;font-family:inherit;background:#fff;color:#334155}
+.req-count{margin-left:auto;font-size:11.5px;color:#64748b;font-variant-numeric:tabular-nums}
+/* 列多时横向滚动，不挤压内容 */
+.req-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.req-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.req-table th{position:sticky;top:0;z-index:1;background:#f8fafc;text-align:left;font-size:11.5px;font-weight:800;color:#475569;
+  padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.req-table th[data-req-sort]{cursor:pointer;user-select:none}
+.req-table th[data-req-sort]:hover{color:var(--accent)}
+.req-table th.on{color:var(--accent)}
+.req-table td{padding:9px 10px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+.req-row{cursor:pointer;transition:background .12s}
+.req-row:hover{background:var(--accent-soft)}
+.req-c-name{min-width:180px}
+.req-c-name b{font-weight:800;color:#0f1729;margin-left:6px}
+.req-badge-arch{display:inline-block;margin-left:6px;font-size:10px;font-weight:800;color:#64748b;
+  background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.req-sub{margin-left:6px;font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
+.req-muted{color:#94a3b8}
+/* 描述列：单行截断 + title 放全文（让读者知道"点开有没有内容"） */
+.req-desc{display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;color:#475569}
+.req-doc{font-size:15px;text-decoration:none}
+.req-doc-empty{font-size:12px}
+.req-pbar{display:inline-block;width:70px;height:6px;border-radius:4px;background:#e2e8f0;overflow:hidden;vertical-align:middle}
+.req-pbar i{display:block;height:100%;background:#16a34a}
+.req-c-pct{white-space:nowrap}
+.req-late{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:800;color:#b91c1c;background:#fef2f2;
+  border:1px solid #fecaca;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.req-ops{white-space:nowrap}
+.req-ops .btn{margin-right:4px}
+/* 只读：写操作与操作列整列隐藏（与版本页 .ver-act 同一套机制） */
+body.readonly-mode .req-act{display:none}
+/* 展开档案 */
+.req-detail-tr>td{padding:0;background:#fbfcfe}
+.req-detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;padding:14px 16px;border-left:3px solid var(--accent)}
+.req-detail-sec h5{margin:0 0 6px;font-size:11.5px;font-weight:800;color:#475569}
+.req-desc-full{margin:0;font-size:12.5px;color:#334155;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.req-kv{display:flex;flex-direction:column;gap:4px}
+.req-kv>span{display:flex;gap:8px;font-size:12px;color:#334155}
+.req-kv i{flex:none;width:66px;font-style:normal;color:#94a3b8}
+.req-kv b{font-weight:700}
+.req-late-note{margin:6px 0 0;font-size:11.5px;color:#b91c1c;line-height:1.6}
+.req-ms-list{display:flex;flex-wrap:wrap;gap:8px}
+.req-ms{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#334155;background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 8px}
+.req-ms b{font-variant-numeric:tabular-nums;color:#0f1729}
+.req-ms-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+/* 窄屏规则已并入文件末尾的手机主样式块（项目约定：手机规则集中一处，
+   且 phoneCss() 取的是"最后一个 ≤767px 断点" —— 另起一个块会把主块挤掉） */
 
 
 

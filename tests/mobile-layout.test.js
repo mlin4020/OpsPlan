@@ -430,6 +430,33 @@ describe('需求台账：导航与视图接入', () => {
   });
 });
 
+describe('需求台账：样式契约（.req-*）', () => {
+  it('台账容器比其它整页视图宽（9 列在 1300px 下会过早横向滚动）', () => {
+    expect(css).toMatch(/\.req-wrap\{[^}]*max-width:1600px/);
+  });
+
+  it('只读模式下写操作与操作列整列隐藏', () => {
+    expect(css).toMatch(/body\.readonly-mode \.req-act\{display:none\}/);
+  });
+
+  it('容器可横向滚动（列多时不挤压内容）', () => {
+    expect(css).toMatch(/\.req-scroll\{[^}]*overflow-x:auto/);
+  });
+
+  it('描述列单行截断，避免把行高撑开', () => {
+    expect(css).toMatch(/\.req-desc\{[^}]*text-overflow:ellipsis/);
+    expect(css).toMatch(/\.req-desc\{[^}]*white-space:nowrap/);
+  });
+
+  it('展开区的描述保留换行（pre-wrap）', () => {
+    expect(css).toMatch(/\.req-desc-full\{[^}]*white-space:pre-wrap/);
+  });
+
+  it('窄屏隐藏描述与文档两个宽文本列', () => {
+    expect(css).toMatch(/\.req-col-opt\{display:none\}/);
+  });
+});
+
 describe('移动端：断点规则', () => {
   const phone = phoneCss();
 
