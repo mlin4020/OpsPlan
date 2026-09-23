@@ -638,14 +638,33 @@ describe('views: 需求台账展开档案', () => {
     expect(html).not.toContain('req-detail-tr');
   });
 
-  it('展开后依次包含描述、文档、上线情况、排期进度、阶段明细、里程碑六段', () => {
+  it('展开后依次包含提出与生命周期、描述、文档、上线情况、排期进度、阶段明细、里程碑七段', () => {
     const ctx = makeReqCtx();
+    ctx.state.modules[0].lifecycle = '已确认';
     toggleReqExpanded('官网改版');
     const html = renderReqView(null, ctx);
     toggleReqExpanded('官网改版');   // 复位，避免污染其它用例
     expect(html).toContain('req-detail-tr');
-    ['desc', 'doc', 'ship', 'progress', 'phases', 'ms']
+    ['propose', 'desc', 'doc', 'ship', 'progress', 'phases', 'ms']
       .forEach(s => expect(html).toContain(`data-req-sec="${s}"`));
+    // 档案行的 colspan 必须覆盖全部 12 列（少一列会让详情区错位）
+    expect(html).toContain('colspan="12"');
+  });
+
+  it('展开档案的「提出与生命周期」里，提测取里程碑而不是 SIT 任务', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].bars = [
+      { id: 'sit-task', s: '2026-08-17', e: '2026-08-21', p: 'sit', w: 5, res: [] },
+      { id: 'tice', m: '2026-08-24', p: 'sit', label: '提测' }
+    ];
+    toggleReqExpanded('官网改版');
+    const html = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');
+    // 只在「提出与生命周期」小节内断言：整页里 8/17 是 SIT 任务自己的日期（阶段明细 / 排期都会渲染），
+    // 对整页断言 not.toContain('8/17') 会把正确实现判成失败
+    const sec = html.slice(html.indexOf('data-req-sec="propose"'), html.indexOf('data-req-sec="desc"'));
+    expect(sec).toContain('8/24');       // 提测 = 提测里程碑
+    expect(sec).not.toContain('8/17');   // 而不是 SIT 任务的开始日
   });
 
   it('描述以原文渲染并保留换行（用 pre-wrap 而非转义丢失）', () => {
@@ -738,5 +757,61 @@ describe('views: 生命周期徽标', () => {
       expect(lifecycleBadge(v)).toContain('class="lc lc-none"');
       expect(lifecycleBadge(v)).toContain('未设置');
     });
+  });
+});
+
+describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
+  it('三个列头齐全且可点排序', () => {
+    const html = renderReqView(null, makeReqCtx());
+    expect(html).toContain('data-req-sort="proposed"');
+    expect(html).toContain('data-req-sort="lifecycle"');
+    expect(html).toContain('data-req-sort="confirm"');
+    expect(html).toMatch(/>提出/);
+    expect(html).toMatch(/>生命周期/);
+    expect(html).toMatch(/>关键时间/);
+  });
+
+  it('提出列显示提出人与日期，缺值时显示「—」', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].proposedBy = '张三';
+    ctx.state.modules[0].proposedAt = '2026-08-01';
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('req-prop');
+    expect(html).toContain('张三');
+    expect(html).toContain('8/1');
+    // 另两条需求都没有提出信息 → 渲染占位符而不是空白
+    expect(html).toContain('req-muted">—');
+  });
+
+  it('生命周期列：有值出对应徽标，未设置出 lc-none', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].lifecycle = '已提测';
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('class="lc lc-sit"');
+    expect(html).toContain('class="lc lc-none"');   // 其余两条需求未设置
+  });
+
+  it('关键时间列取确认与提测里程碑，测试任务不算提测', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules = [{
+      name: '卡点样本',
+      bars: [
+        { id: 'cfm', m: '2026-08-14', p: 'cfm', label: '需求确认' },
+        { id: 'sit-task', s: '2026-08-17', e: '2026-08-21', p: 'sit', w: 5, res: [] },
+        { id: 'tice', m: '2026-08-24', p: 'sit', label: '提测' }
+      ]
+    }];
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('req-gate');
+    expect(html).toContain('8/14');                  // 确认
+    expect(html).toContain('8/24');                  // 提测（不是 8/17 的测试任务）
+  });
+
+  it('没有任何里程碑的需求，关键时间显示「—」', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules = [{ name: '空需求', bars: [] }];
+    const html = renderReqView(null, ctx);
+    expect(html).not.toContain('req-gate');
+    expect(html).toContain('req-muted">—');
   });
 });

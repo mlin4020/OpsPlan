@@ -15,11 +15,11 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { moduleTag, currentPhase, computeModulePer, progressDeviation } from '../core/mod-tag.js';
+import { moduleTag, currentPhase, computeModulePer, progressDeviation, findGateMs } from '../core/mod-tag.js';
 import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
 import { filterMods, sortMods } from '../core/mod-query.js';
 import { modStats, renderModDetailRows } from './mod-card.js';
-import { priorityBadge } from './badge.js';
+import { priorityBadge, lifecycleBadge } from './badge.js';
 
 const reqExpanded = new Set();
 
@@ -92,6 +92,27 @@ function docCell(mo) {
     title="打开需求文档（新窗口）" aria-label="打开需求文档">📄</a>`;
 }
 
+// 提出信息：有哪项显示哪项，都没有显示「—」（与「未加入版本」同风格，不留空白）
+function proposedCell(mo) {
+  const by = (mo.proposedBy || '').trim();
+  const at = (mo.proposedAt || '').trim();
+  if (!by && !at) return '<span class="req-muted">—</span>';
+  return [
+    by ? `<b class="req-prop">${esc(by)}</b>` : '',
+    at ? `<span class="req-sub">${fmtD(F(at))}</span>` : ''
+  ].filter(Boolean).join(' ');
+}
+
+// 关键时间：需求确认 / 提测两个卡点的日期（不新增字段，实时读排期里程碑）
+// 口径见 core/mod-tag.js 的 findGateMs：提测只能按 label 认，不能判 p='sit'
+function gateCell(mo) {
+  const cfm = findGateMs(mo, 'confirm');
+  const tice = findGateMs(mo, 'submit');
+  if (!cfm && !tice) return '<span class="req-muted">—</span>';
+  const chip = (b, label) => `<span class="req-gate"><i style="background:${PCOL[b.p] || '#94a3b8'}"></i>${label}<b>${fmtD(F(b.m))}</b></span>`;
+  return [cfm ? chip(cfm, '确认') : '', tice ? chip(tice, '提测') : ''].filter(Boolean).join('');
+}
+
 function shipCell(ship) {
   const parts = [`<span class="tag" style="background:${ship.color}">${ship.text}</span>`];
   // plan / actual 是 "YYYY-MM-DD" 字符串 → 需要 F() 转 Date
@@ -125,11 +146,14 @@ function rowHtml(mo, ctx) {
 
   return `<tr class="req-row" data-req-row="${esc(mo.name)}">
     <td class="req-c-name">${priorityBadge(mo.pri)}<b>${esc(mo.name)}</b>${archFlag}</td>
+    <td class="req-col-opt">${proposedCell(mo)}</td>
     <td><span class="tag" style="background:${tagc}">${tag}</span></td>
+    <td class="req-c-lc">${lifecycleBadge(mo.lifecycle)}</td>
     <td class="req-col-opt">${descCell(mo)}</td>
     <td class="req-col-opt">${docCell(mo)}</td>
     <td>${ver ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>` : '<span class="req-muted">未加入版本</span>'}</td>
     <td>${rng ? `<span class="req-sub">${fmtD(rng.start)}~${fmtD(rng.end)}</span>` : `<span class="req-muted">${mo.unscheduled ? '待排期' : '—'}</span>`}</td>
+    <td class="req-c-gate">${gateCell(mo)}</td>
     <td class="req-c-pct">
       <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
       <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
@@ -183,7 +207,7 @@ function msList(mo) {
 }
 
 // 展开档案：把「一个需求的完整故事」摊开（设计文档 §4.2）
-// 六段固定顺序：描述 → 文档 → 上线情况 → 排期与进度 → 阶段明细 → 里程碑
+// 七段固定顺序：提出与生命周期 → 描述 → 文档 → 上线情况 → 排期与进度 → 阶段明细 → 里程碑
 function detailHtml(mo, ctx) {
   const { today } = ctx;
   const ship = shipInfo(mo, ctx);
@@ -193,12 +217,26 @@ function detailHtml(mo, ctx) {
   const desc = (mo.desc || '').trim();
   const docUrl = safeDocUrl(mo.docUrl);
   const per = computeModulePer(mo.bars || [], ctx.state.resources);
+  const propBy = (mo.proposedBy || '').trim();
+  const propAt = (mo.proposedAt || '').trim();
+  const cfmMs = findGateMs(mo, 'confirm');
+  const ticeMs = findGateMs(mo, 'submit');
   const dev = progressDeviation(mo.bars, st);
   // 展开区是"细读"场景，措辞要给全：已完成的需求不报偏差，直接说「已完成」
   const deviTxt = !st.work ? '' : (dev.finished ? '已完成' : (dev.label || '按计划'));
 
-  return `<tr class="req-detail-tr"><td colspan="9">
+  return `<tr class="req-detail-tr"><td colspan="12">
     <div class="req-detail">
+      <div class="req-detail-sec" data-req-sec="propose">
+        <h5>提出与生命周期</h5>
+        <div class="req-kv">
+          <span><i>提出人</i><b>${propBy ? esc(propBy) : '—'}</b></span>
+          <span><i>提出时间</i><b>${propAt ? fmtD(F(propAt)) : '—'}</b></span>
+          <span><i>生命周期</i><b>${lifecycleBadge(mo.lifecycle)}</b></span>
+          <span><i>需求确认</i><b>${cfmMs ? fmtD(F(cfmMs.m)) : '—'}</b></span>
+          <span><i>提测</i><b>${ticeMs ? fmtD(F(ticeMs.m)) : '—'}</b></span>
+        </div>
+      </div>
       <div class="req-detail-sec" data-req-sec="desc">
         <h5>需求描述</h5>
         ${desc ? `<p class="req-desc-full">${esc(desc)}</p>` : '<p class="req-muted">未填写描述 —— 在「编辑」里补充，业务与领导都靠它理解需求</p>'}
@@ -262,10 +300,10 @@ export function renderReqView(container, ctx) {
     </div></div>`;
   }
 
-  const th = (key, label, cls = '') => {
+  const th = (key, label, cls = '', title = '') => {
     const on = sort.key === key ? ' on' : '';
     const arrow = sort.key === key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : '';
-    return `<th data-req-sort="${key}" class="${(cls + on).trim()}">${label}${arrow}</th>`;
+    return `<th data-req-sort="${key}" class="${(cls + on).trim()}"${title ? ` title="${esc(title)}"` : ''}>${label}${arrow}</th>`;
   };
 
   // 展开档案紧跟在被点开的那一行之后（同一 tbody 内的 detail 行）
@@ -277,11 +315,14 @@ export function renderReqView(container, ctx) {
         <table class="req-table">
           <thead><tr>
             ${th('name', '需求')}
+            ${th('proposed', '提出', 'req-col-opt', '提出人 / 提出时间；窄屏隐藏该列（背景信息，不是对比指标）')}
             ${th('status', '状态')}
+            ${th('lifecycle', '生命周期', '', '人工维护的流程门，与左侧自动计算的「状态」不是同一件事')}
             <th class="req-col-opt">描述</th>
             <th class="req-col-opt">文档</th>
             ${th('version', '所属版本')}
             ${th('start', '排期')}
+            ${th('confirm', '关键时间', '', '需求确认 / 提测两个卡点的排期日期；点击按需求确认时间排序，缺里程碑的排最后')}
             ${th('pct', '进度')}
             ${th('ship', '上线情况')}
             <th class="req-act">操作</th>
