@@ -10,7 +10,7 @@ import { priorityBadge } from '../src/views/badge.js';
 import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
 import { renderModDetailRows, renderModCard } from '../src/views/mod-card.js';
-import { renderReqView, toggleReqExpanded } from '../src/views/req-view.js';
+import { renderReqView, toggleReqExpanded, shipInfo } from '../src/views/req-view.js';
 
 // 构造最小渲染 ctx（与 renderAll 的 buildViewCtx 契约对齐）
 function makeCtx() {
@@ -597,6 +597,38 @@ describe('views: 需求台账主行表格', () => {
     expect(arch).not.toContain('延后');                             // 但不再提示延后
     expect(arch).not.toContain('req-devi');
     expect(arch).toContain('<i class="archived"');                  // 进度条转中性色
+  });
+});
+
+describe('views: 需求台账「上线情况」列措辞', () => {
+  // 这一列取 versionStatus 的版本口径，其中「进行中」（版本有成员已开工）
+  // 和「已逾期」（版本过了上线日没发）会与左边「状态」列的 moduleTag 撞词。
+  // 同一行两个「进行中」/两个「已逾期」且含义不同，读者分不清说的是需求还是版本。
+  it('用上线口径措辞，不复述需求状态', () => {
+    // 显式造一个"计划已到期但未完成"的需求，不依赖默认数据的完成度
+    const withVer = (date, shipped) => {
+      const ctx = makeReqCtx();                      // today = 2026-08-20
+      ctx.state.modules = [{
+        name: '样本需求',
+        bars: [{ id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-07', w: 5, done: 0, res: [] }]
+      }];
+      ctx.state.versions = [{
+        id: 'v1', name: 'V1', date,
+        shipped: !!shipped, shippedAt: shipped ? '2026-08-19' : null, mods: ['样本需求']
+      }];
+      return ctx;
+    };
+    const text = (date, shipped) => {
+      const ctx = withVer(date, shipped);
+      return shipInfo(ctx.state.modules[0], ctx).text;
+    };
+
+    // 版本在做 → 「未上线」，而不是与状态列重复的「进行中」
+    expect(text('2026-12-01')).toBe('未上线');
+    // 人工标记上线
+    expect(text('2026-12-01', true)).toBe('已上线');
+    // 过了上线日仍未完成 → 「上线逾期」，而不是需求口径的「已逾期」
+    expect(text('2026-08-01')).toBe('上线逾期');
   });
 });
 

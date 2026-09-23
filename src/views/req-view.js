@@ -38,6 +38,19 @@ const esc = s => String(s == null ? '' : s)
 // 口径边界：无版本的需求 versionStatus 会返回「未开始」，对读者是误导 ——
 // 故这里先判版本存在性，无版本一律显示「未加入版本」，且不给「赶不上」预警
 // （modLate 本身也只在有版本时才有效）。
+// 台账「上线情况」列的措辞只讲上线维度，不复述需求状态。
+// 原因：versionStatus 用的是版本口径，其中「进行中」（版本有成员已开工）和
+// 「已逾期」（版本过了上线日没发）会与左边「状态」列的 moduleTag 撞词 ——
+// 同一行出现两个「进行中」、两个「已逾期」，且含义并不相同，读者要费劲分辨。
+// 版本页保留 versionStatus 原文案：那里讲的就是版本本身，语境自洽。
+const SHIP_TEXT = {
+  shipped: '已上线',
+  ready: '待上线',      // 成员全部完成、只等发版 —— 有行动含义，必须保留
+  overdue: '上线逾期',
+  doing: '未上线',      // 版本做没开工不属于「上线情况」这列的信息，合并为「未上线」
+  todo: '未上线'
+};
+
 export function shipInfo(mo, ctx) {
   const { state, today } = ctx;
   const v = versionOfMod(state, mo.name);
@@ -52,7 +65,7 @@ export function shipInfo(mo, ctx) {
   }
   const st = versionStatus(v, state, today);
   return {
-    text: st.text, color: st.color,
+    text: SHIP_TEXT[st.key] || st.text, color: st.color,
     plan: v.date || planFromMs,
     actual: v.shipped ? v.shippedAt : null,
     // 已上线的版本不再有"赶不上"风险 —— 都已经发布完了，再报风险只会误导读者
