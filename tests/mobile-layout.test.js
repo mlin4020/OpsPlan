@@ -423,3 +423,32 @@ describe('移动端：断点规则', () => {
     expect(phone).toContain('safe-area-inset-bottom');
   });
 });
+
+describe('需求台账：描述与需求文档字段贯通', () => {
+  const modals = readFileSync(resolve(ROOT, 'src/components/modals.js'), 'utf8');
+  const shell = readFileSync(resolve(ROOT, 'src/components/shell.js'), 'utf8');
+  const muts = readFileSync(resolve(ROOT, 'src/scheduler/mutations.js'), 'utf8');
+
+  it('抽屉里有描述与文档链接两个控件', () => {
+    expect(shell).toContain('id="newModDesc"');
+    expect(shell).toContain('id="newModDocUrl"');
+  });
+
+  it('打开时回显、保存时读取并校验', () => {
+    expect(modals).toMatch(/g\('newModDesc'\)\.value = /);
+    expect(modals).toMatch(/g\('newModDocUrl'\)\.value = /);
+    // 新增与编辑两条路径都要带上两个新字段
+    expect(modals).toMatch(/addModule\(\{[\s\S]*?desc:[\s\S]*?docUrl:/);
+    expect(modals).toMatch(/updateModule\(\{[\s\S]*?desc:[\s\S]*?docUrl:/);
+    // 只放行 http/https，挡掉伪协议（源码里是 /^https?:\/\//i 这个正则字面量）
+    expect(modals).toContain('https?:\\/\\/');
+    expect(modals).toContain('文档链接需以 http');
+  });
+
+  it('数据层接受两个字段，空串归一为 undefined', () => {
+    expect(muts).toMatch(/if \('desc' in opts\)/);
+    expect(muts).toMatch(/if \('docUrl' in opts\)/);
+    expect(muts).toMatch(/delete mo\.desc/);
+    expect(muts).toMatch(/delete mo\.docUrl/);
+  });
+});

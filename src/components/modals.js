@@ -67,6 +67,8 @@ function openNewModModal(deps) {
   g('newModTagc').value = nextModuleColor(deps.planStore.state.modules);
   refreshModColorTip(deps);
   g('newModPer').value = '';
+  g('newModDesc').value = '';
+  g('newModDocUrl').value = '';
   renderModSchedSeg(false, deps);   // 默认「已排期」
   renderModPriSeg(PRIORITY_DEFAULT, deps);   // 新建默认 P2（未设置留给历史数据）
   g('btnNewModSave').textContent = '创建';
@@ -94,6 +96,8 @@ function openEditModModal(modName, deps) {
   g('newModTagc').value = modColors[mo.name] || mo.tagc || autoTagc;
   refreshModColorTip(deps);
   g('newModPer').value = mo.per || autoPer;
+  g('newModDesc').value = mo.desc || '';
+  g('newModDocUrl').value = mo.docUrl || '';
   renderModSchedSeg(!!mo.unscheduled, deps);
   // 回显实际值：老数据无 pri 时选中「无」，保存后仍是未设置
   renderModPriSeg(mo.pri, deps);
@@ -181,9 +185,20 @@ function bindModalControls(deps) {
   const tagcInp = g('newModTagc');
   if (tagcInp) tagcInp.addEventListener('input', () => refreshModColorTip(deps));
 
+  // 需求文档只放行 http/https：拦掉 javascript: 之类的伪协议（点开即执行）
+  const readDocUrl = () => {
+    const v = (g('newModDocUrl').value || '').trim();
+    if (!v) return { ok: true, value: '' };
+    return /^https?:\/\//i.test(v)
+      ? { ok: true, value: v }
+      : { ok: false, msg: '文档链接需以 http:// 或 https:// 开头' };
+  };
+
   on('btnNewModSave', () => {
     const name = g('newModName').value.trim();
     if (!name) { deps.toast('需求名称不能为空'); return; }
+    const doc = readDocUrl();
+    if (!doc.ok) { deps.toast(doc.msg); return; }
     if (modEditName) {
       // 编辑模式
       if (name !== modEditName && deps.planStore.state.modules.some(m => m.name === name)) {
@@ -191,7 +206,7 @@ function bindModalControls(deps) {
       }
       try {
         // tagc 落「实际生效色」：与去重逻辑、后续弹窗回显保持同一口径
-        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), per: g('newModPer').value.trim(), unscheduled: readModSched(deps), pri: readModPri(deps) });
+        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), per: g('newModPer').value.trim(), unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
         const collapsed = deps.viewState.collapsed;
         collapsed[name] = collapsed[modEditName];
         if (name !== modEditName) delete collapsed[modEditName];
@@ -204,7 +219,7 @@ function bindModalControls(deps) {
       if (deps.planStore.state.modules.some(m => m.name === name)) { deps.toast('需求已存在：' + name); return; }
       const phases = selectedPhases(deps);
       if (phases === null) { deps.toast('请至少选择一个要初始化的阶段'); return; }
-      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), per: g('newModPer').value.trim(), phases, unscheduled: readModSched(deps), pri: readModPri(deps) });
+      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), per: g('newModPer').value.trim(), phases, unscheduled: readModSched(deps), pri: readModPri(deps), desc: g('newModDesc').value, docUrl: doc.value });
       closeNewModModal(deps);
       deps.viewState.collapsed[name] = false;
       deps.render();

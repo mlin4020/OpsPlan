@@ -343,6 +343,8 @@ ${mobileSheetHTML()}
     <div class="f-row"><label>标签</label><input type="text" id="newModTag" placeholder="如：开发中 / 冲刺中 / 待启动"></div>
     <div class="f-row"><label>需求颜色<span class="phase-tip">同一需求的任务条 / 里程碑统一用它</span></label><input type="color" id="newModTagc" value="#3b82f6"><span class="phase-tip" id="newModTagcTip" style="margin-left:0"></span></div>
     <div class="f-row"><label>人员配置</label><input type="text" id="newModPer" placeholder="如：需求1+开发2"></div>
+    <div class="f-row"><label>描述<span class="phase-tip">给领导 / 业务看的一段说明，会显示在需求台账页</span></label><textarea id="newModDesc" rows="3" placeholder="这个需求要解决什么问题、范围是什么"></textarea></div>
+    <div class="f-row"><label>需求文档<span class="phase-tip">外部链接（语雀 / 飞书文档 / Confluence）</span></label><input type="text" id="newModDocUrl" placeholder="https://..."></div>
     <div class="f-row">
       <label>排期状态<span class="phase-tip" id="modSchedTip">待排期：只登记需求，不展示排期条、不计入并行/逾期</span></label>
       <div class="seg" id="segModSched">

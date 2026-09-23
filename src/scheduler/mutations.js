@@ -291,6 +291,9 @@ export function createMutations(ctx) {
       // 优先级：新建时给默认值（未传或非法值都落到 PRIORITY_DEFAULT），
       // 历史数据没有该字段则保持 undefined = 未设置，不替用户补值
       pri: normalizePriority(opts.pri) || PRIORITY_DEFAULT,
+      // 描述与需求文档：给领导 / 业务看的重内容，空串归一为 undefined（= 未填写）
+      desc: (opts.desc || '').trim() || undefined,
+      docUrl: (opts.docUrl || '').trim() || undefined,
       bars: []
     };
     // 支持新建时直接标记为待排期（尚未排期，只登记需求）
@@ -398,6 +401,15 @@ export function createMutations(ctx) {
           ctx.recomputeAffected(ctx.collectAffected(msId));
         }
       }
+    }
+    // 描述与需求文档：传空串 = 清除（回到"未填写"），与 tag / per 的归一化口径一致
+    if ('desc' in opts) {
+      const d = (opts.desc || '').trim();
+      if (d) mo.desc = d; else delete mo.desc;
+    }
+    if ('docUrl' in opts) {
+      const u = (opts.docUrl || '').trim();
+      if (u) mo.docUrl = u; else delete mo.docUrl;
     }
     ctx.collect();  // 重建索引（写回任务的 mod 引用）
     ctx.save();
