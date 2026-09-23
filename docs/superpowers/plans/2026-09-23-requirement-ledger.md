@@ -287,7 +287,7 @@ import { newVersionId, versionOfMap, isGoMs, findGoMs } from '../core/versions.j
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `npx vitest run tests/version.test.js tests/scheduler.test.js`
-Expected: PASS（全部。`scheduler.test.js` 覆盖版本写入路径，用来确认搬运没改行为）
+Expected: `scheduler.test.js` 全绿（它覆盖版本写入路径，用来确认搬运没改行为）；`version.test.js` 新增的 `isGoMs` / `findGoMs` 用例全绿，但该文件仍有 1 条历史失败（报告页「风险与关注点」含版本赶不上预警，见文末「已知不在范围内」），与本次搬运无关。
 
 - [ ] **Step 6: 提交**
 
@@ -414,7 +414,7 @@ import { computeModulePer, milestoneName, moduleTag, currentPhase } from '../cor
 - [ ] **Step 5: 跑测试确认通过**
 
 Run: `npx vitest run tests/core.test.js tests/views.test.js tests/version.test.js tests/report-layout.test.js`
-Expected: PASS（`version-view.js` / `report-view.js` 仍在从 `mod-card.js` 引 `modStats`，转出后不受影响）
+Expected: 除 `version.test.js` 那 1 条历史失败外全绿（`version-view.js` / `report-view.js` 仍在从 `mod-card.js` 引 `modStats`，转成 re-export 后不受影响）。
 
 - [ ] **Step 6: 提交**
 
@@ -1743,11 +1743,16 @@ git commit -m "feat(req-page): 需求台账的展开/排序/筛选/行操作委�
 
 **Files:**
 - Modify: `src/components/shell.js:46-51`、`:100-106`、`:148-155`（三处导航）
-- Modify: `src/components/toolbar.js:40-52`
+- Modify: `src/components/toolbar.js:35-52`
 - Modify: `src/views/index.js:20`、`:172-174`、`:200`
 - Modify: `src/main-gantt.js:33`、`:103-119`
 - Modify: `src/main-standalone.js:54`、`:94-97`、`:108-119`、`:142-148`
+- Modify: `src/styles/gantt.css:346-348`、`:668`（body class 改名 —— 必须与本任务同步，否则视图切换的收敛规则对不上）
 - Test: `tests/mobile-layout.test.js`、`tests/version.test.js`
+
+> **本任务必须一并处理两条既有断言**，否则它们会因为 `arch-view` 消失而失败：
+> 1. `tests/mobile-layout.test.js:171-187` 的 `归档视图收敛工具栏` 用例 —— 用例名改为 `需求台账收敛工具栏`，其中三条断言里的 `arch-view` 全部换成 `req-view`（`toolbar` 的 `classList.toggle`、`css` 的 `[data-report-hide]` 与 `[data-zoom-only]`、以及 `return v !== ...` 那一行）。
+> 2. `tests/mobile-layout.test.js:374-377` 的 badge 断言（`archNavCount` / `archNavCountM`）—— 改为断言这两个 id 在 `shell.js` 与查看器壳里都不存在。
 
 **Interfaces:**
 - Consumes: Task 7/8 的 `renderReqView`、`toggleReqExpanded`、`isReqExpanded`；Task 9 的 `bindReqPage`
@@ -1856,11 +1861,22 @@ Expected: FAIL — 全部新断言不通过
 
 同时把 `:35` 注释里的 `arch-view` 改成 `req-view`。
 
-`src/views/index.js`：
+`src/styles/gantt.css` 的两处 body class 必须在本任务一起改名 —— 工具栏 class 与 CSS 收敛规则是配套的，分开改会出现"切了视图但工具栏不收"的空窗：
 
-```js
-import { renderReqView } from './req-view.js';
+```css
+body.req-view [data-report-hide]:not(.stats){display:none}
 ```
+
+```css
+body.req-view .msheet-item[data-zoom-only]{display:none}
+```
+
+（`:346-347` 注释里的「归档页」一并改为「需求台账页」。）
+
+`src/views/index.js`（三处都要**替换**掉 archive 的引用，不能只追加 —— Task 11 会删除 `archive-view.js`，留下残留引用会直接报"模块找不到"）：
+
+1. `:20` 的 `import { renderArchiveView } from './archive-view.js';` → `import { renderReqView } from './req-view.js';`
+2. `:172-174` 的整页文档分支：
 
 ```js
   if (view === 'req' || view === 'work' || view === 'version') {
@@ -1868,9 +1884,7 @@ import { renderReqView } from './req-view.js';
       : (view === 'work' ? renderWorkView(gantt, full) : renderVersionView(gantt, full));
 ```
 
-```js
-export { renderReqView, toggleReqExpanded, isReqExpanded } from './req-view.js';
-```
+3. `:200` 的 `export { renderArchiveView } from './archive-view.js';` → `export { renderReqView, toggleReqExpanded, isReqExpanded } from './req-view.js';`
 
 - [ ] **Step 5: 两个入口接线**
 
@@ -1904,9 +1918,10 @@ const viewFromQuery = ['res', 'report', 'mod', 'req', 'work', 'version'].include
       reqSort: viewState.reqSort,
 ```
 
-`ctxInjection` 的注入参数里加 `toggleReqExpanded`：
+`bindAll({ ... })` 的调用参数里，在 `toggleReportExpanded` 旁边补上展开态切换（`components/index.js` 已在 Task 9 把它透传进 `ctxInjection`）：
 
 ```js
+    toggleReportExpanded,
     toggleReqExpanded
 ```
 
@@ -1919,14 +1934,15 @@ const viewFromQuery = ['res', 'report', 'mod', 'req', 'work', 'version'].include
 并在 `bindVersionPage({...})` 之后加：
 
 ```js
-  // 需求台账：查看器里同样要能展开档案 / 排序 / 筛选（领导看的就是这个）
-  bindReqPage({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, toggleReqExpanded });
+  // 需求台账：查看器里同样要能展开档案 / 排序 / 筛选（领导看的就是这个）。
+  // isReadonly 固定 true：查看器全只读，写操作拦在最前面（按钮另有 CSS 隐藏，这是第二道防线）
+  bindReqPage({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, toggleReqExpanded, isReadonly: () => true });
 ```
 
 - [ ] **Step 6: 跑测试确认通过**
 
 Run: `npx vitest run tests/mobile-layout.test.js tests/version.test.js`
-Expected: PASS
+Expected: 新增断言全部通过；`version.test.js` 仍剩 1 条历史失败（报告页「风险与关注点」含版本赶不上预警，见文末「已知不在范围内」），非本任务引入。
 
 - [ ] **Step 7: 提交**
 
@@ -2045,21 +2061,12 @@ describe('需求台账：样式契约', () => {
 Run: `npx vitest run tests/mobile-layout.test.js`
 Expected: FAIL
 
-- [ ] **Step 3: 改名两处 body class**
+- [ ] **Step 3: 确认 body class 改名已完成**
 
-`src/styles/gantt.css:348`：
+两处 `body.arch-view` → `body.req-view` 已在 Task 10 随工具栏一起改完（两者是配套规则，分两批改会开一个"切了视图但工具栏不收"的空窗）。本步只做确认：
 
-```css
-body.req-view [data-report-hide]:not(.stats){display:none}
-```
-
-`:668`：
-
-```css
-body.req-view .msheet-item[data-zoom-only]{display:none}
-```
-
-同时更新 `:346-347` 的注释，把「归档页」改为「需求台账页」。
+Run: `git --no-pager grep -n "arch-view" -- src/styles/gantt.css`
+Expected: 无输出
 
 - [ ] **Step 4: 追加台账样式**
 
