@@ -12,7 +12,7 @@
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
-import { computeModulePer, computePlanPct, milestoneName, moduleTag } from '../core/mod-tag.js';
+import { computeModulePer, computePlanPct, milestoneName, moduleTag, currentPhase } from '../core/mod-tag.js';
 import { versionOfMod } from '../core/versions.js';
 import { priorityBadge, versionBadge } from './badge.js';
 
@@ -89,8 +89,6 @@ export function renderModCard(mo, ctx, opts = {}) {
     return `<div class="rmod-m ${cls}" style="left:${p.toFixed(1)}%" title="📌 ${fmtD(F(b.m))} ${msName(b, mo.name)}">
       <i></i><b></b><em>${lbl}</em></div>`;
   }).join('') : '';
-  const curTask = bars.filter(b => !b.m && (!b.done || b.done < 100) && F(b.s) <= today && F(b.e) >= today).sort((a, b) => F(a.s) - F(b.s))[0];
-  const curPhase = curTask ? (PNAME[curTask.p] || curTask.p) : (bars.some(b => !b.m && (!b.done || b.done < 100)) ? '待启动' : '已全部完成');
   const open = isExpanded(mo.name);
   const detailRows = open ? bars.filter(b => !b.m).sort((a, b) => F(a.s) - F(b.s)).map(b => {
     const pc = PCOL[b.p] || '#94a3b8';
@@ -121,7 +119,7 @@ export function renderModCard(mo, ctx, opts = {}) {
       <div class="rmod-head">
         <span class="rmod-title"><b class="rmod-name">${mo.name}</b>${priorityBadge(mo.pri)}${versionBadge(ver)}<span class="rmod-range">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : '暂无'}</span>${archivedAt ? `<span class="rmod-at" title="归档时间">${archivedAt}</span>` : ''}</span>
         <span class="rmod-meta" title="完成 ${mp.toFixed(1)}% · ${mDone.toFixed(1)}/${mWork} 人日${stTxt ? ' · ' + stTxt : ''}"><b>${mp.toFixed(1)}%</b><i>${mDone.toFixed(1)}/${mWork} 人日</i>${stTxt ? `<span class="rmod-devi ${st}">${stTxt}</span>` : ''}</span>
-        <span class="rmod-phase">${curPhase}</span>
+        <span class="rmod-phase">${currentPhase(mo, today)}</span>
       </div>
       ${actions}<span class="rmod-arr">${open ? '▲' : '▼'}</span>
     </div>

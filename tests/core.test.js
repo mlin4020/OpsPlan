@@ -7,7 +7,7 @@ import {
   defaultModules, defaultResources, defaultHolidays
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
-import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag } from '../src/core/mod-tag.js';
+import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag, currentPhase } from '../src/core/mod-tag.js';
 import { isOverdueTask } from '../src/core/task-status.js';
 import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
@@ -379,5 +379,42 @@ describe('store/user-store', () => {
     userStore.set({ readonly: true });
     expect(received.readonly).toBe(true);
     unsub();
+  });
+});
+
+describe('core: currentPhase 需求当前阶段', () => {
+  const today = F('2026-08-20');
+  const bar = o => ({ id: 'x', p: 'dev', s: '2026-08-18', e: '2026-08-22', w: 5, ...o });
+
+  it('取正在进行中最早的未完成任务所属阶段', () => {
+    const mo = { name: 'A', bars: [
+      bar({ id: 'a', p: 'req', s: '2026-08-10', e: '2026-08-14', done: 100 }),
+      bar({ id: 'b', p: 'sit', s: '2026-08-19', e: '2026-08-25', done: 0 }),
+      bar({ id: 'c', p: 'dev', s: '2026-08-18', e: '2026-08-21', done: 10 })
+    ] };
+    // dev 开始更早 → 排在前面
+    expect(currentPhase(mo, today)).toBe('开发');
+  });
+
+  it('里程碑不参与阶段判定', () => {
+    const mo = { name: 'A', bars: [
+      { id: 'm', m: '2026-08-20', p: 'go', label: '上线' },
+      bar({ id: 'b', p: 'dev', s: '2026-08-18', e: '2026-08-22', done: 0 })
+    ] };
+    expect(currentPhase(mo, today)).toBe('开发');
+  });
+
+  it('没有进行中的任务但有未完成任务 → 待启动', () => {
+    const mo = { name: 'A', bars: [bar({ id: 'b', p: 'dev', s: '2026-09-01', e: '2026-09-05', done: 0 })] };
+    expect(currentPhase(mo, today)).toBe('待启动');
+  });
+
+  it('全部任务完成 → 已全部完成', () => {
+    const mo = { name: 'A', bars: [bar({ id: 'b', p: 'dev', done: 100 })] };
+    expect(currentPhase(mo, today)).toBe('已全部完成');
+  });
+
+  it('没有任务 → 已全部完成（与卡片既有行为一致）', () => {
+    expect(currentPhase({ name: 'A', bars: [] }, today)).toBe('已全部完成');
   });
 });

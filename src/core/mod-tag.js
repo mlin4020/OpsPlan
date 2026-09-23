@@ -72,6 +72,22 @@ export function moduleTag(mo, today) {
 }
 
 /**
+ * 需求当前所处阶段：进行中的最早未完成任务所属阶段；
+ * 没有进行中的任务但有未完成任务 → 「待启动」；全部完成 → 「已全部完成」。
+ *
+ * 从 views/mod-card.js 抽出：总览卡片与需求台账都要显示"现在到哪一步"，
+ * 两处各写一份必然给出两个答案。
+ */
+export function currentPhase(mo, today) {
+  const bars = (mo && mo.bars) || [];
+  const curTask = bars
+    .filter(b => !b.m && (!b.done || b.done < 100) && F(b.s) <= today && F(b.e) >= today)
+    .sort((a, b) => F(a.s) - F(b.s))[0];
+  if (curTask) return PNAME[curTask.p] || curTask.p;
+  return bars.some(b => !b.m && (!b.done || b.done < 100)) ? '待启动' : '已全部完成';
+}
+
+/**
  * 计划应达基线（时间口径）：需求时间跨度到今天已经走过的比例
  *
  * 语义 =「按计划时间，现在应该推进到哪里」，与「实际完成度」相减得到偏差：
