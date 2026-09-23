@@ -942,6 +942,8 @@ body.readonly-mode .ver-act{display:none}
 .req-pbar i{display:block;height:100%;background:#16a34a}
 /* 进度条颜色跟随偏差（与总览卡片 .rmod-bar-fill 同口径）：延后红、正常/超前绿 */
 .req-pbar i.late{background:#dc2626}
+/* 已归档需求：不参与健康度评判，进度条转中性色（不留红而不写原因，那样更困惑） */
+.req-pbar i.archived{background:#94a3b8}
 .req-c-pct{white-space:nowrap}
 /* 偏差文字：与卡片 .rmod-devi 同一套语义色 */
 .req-devi{margin-left:6px;font-size:10.5px;font-weight:800;font-variant-numeric:tabular-nums}

@@ -98,11 +98,16 @@ function rowHtml(mo, ctx) {
   const rng = mo.unscheduled ? null : ctx.modRange(mo);
   const st = modStats(mo.bars, ctx);
   // 偏差与总览卡片 / 排期总览同口径（EV − PV），判定集中在 core/mod-tag.js 的 progressDeviation
-  // （含"已完成不报偏差"这条，三处必须一致）；
-  // 无排期需求不判偏差（日期本身不可信），进度条也就不变色
+  // （含"已完成不报偏差"这条，三处必须一致）。
+  // 两类需求不参与健康度评判：
+  //   · 待排期：没有排期区间（rng 为空），日期本身不可信，无从判偏差
+  //   · 已归档：留档查阅用，「延后 40%」这种行动导向的提醒对它已无意义。
+  //     但进度条不能留着红——红了却不写原因只会更困惑，故转中性色。
+  //     已完成的需求例外，仍走绿：100% 是既成事实，与是否归档无关。
   const dev = progressDeviation(mo.bars, st);
-  const stCls = rng ? dev.key : '';
-  const deviTxt = rng ? dev.label : '';
+  const archQuiet = !!mo.archived && !dev.finished;
+  const stCls = !rng ? '' : (archQuiet ? 'archived' : dev.key);
+  const deviTxt = (rng && !mo.archived) ? dev.label : '';
   const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
 
   return `<tr class="req-row" data-req-row="${esc(mo.name)}">

@@ -574,6 +574,30 @@ describe('views: 需求台账主行表格', () => {
     expect(html).not.toContain('超前');
     expect(html).toContain('100% · 6.0/6 人日');    // 完成度照常展示
   });
+
+  it('已归档的需求不体现延后（进度条中性色，不再报偏差）', () => {
+    // 同一份数据、只切 archived 开关：未归档要如实提示，归档后不该再提示
+    const render = archived => {
+      const ctx = makeReqCtx();                     // today = 2026-08-20
+      const mo = {
+        name: '归档样本',
+        bars: [
+          { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-07', w: 5, done: 0, res: [] }, // 已到期未完成
+          { id: 'b', p: 'go', s: '2026-12-01', e: '2026-12-01', w: 1, done: 0, res: [] }   // 远期收口
+        ]
+      };
+      if (archived) mo.archived = true;
+      ctx.state.modules = [mo];                     // 只留一条，避免其他需求的文案干扰断言
+      return renderReqView(null, ctx);
+    };
+    expect(render(false)).toContain('延后');                        // 未归档：如实提示
+    expect(render(false)).toContain('<i class="late"');             // 且进度条转红
+    const arch = render(true);
+    expect(arch).toContain('req-badge-arch');                       // 归档标记照常
+    expect(arch).not.toContain('延后');                             // 但不再提示延后
+    expect(arch).not.toContain('req-devi');
+    expect(arch).toContain('<i class="archived"');                  // 进度条转中性色
+  });
 });
 
 describe('views: 需求台账展开档案', () => {
