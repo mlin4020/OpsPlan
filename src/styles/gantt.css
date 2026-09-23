@@ -123,6 +123,15 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .pri-p1{color:#92400e;background:#fef3c7;border-color:#fcd34d}
 .pri-p2{color:#1d4ed8;background:#dbeafe;border-color:#93c5fd}
 .pri-p3{color:#475569;background:#eef2f7;border-color:#cbd5e1}
+/* 生命周期徽标（需求台账「生命周期」列）：与 .pri 同族的"浅底 + 描边"，
+   与实心状态标签（.tag）区分开；未设置用虚线描边 —— 一眼能辨"没填"而不是渲染坏了。
+   配色沿用项目数据语义色（灰=未开始 / 蓝=已定 / 琥珀=进行中 / 绿=完成），与主题品牌色无关。 */
+.lc{display:inline-flex;align-items:center;flex:none;font-size:9px;font-weight:800;line-height:1;padding:2px 5px;border-radius:5px;border:1px solid;letter-spacing:.2px;white-space:nowrap}
+.lc-none{color:#64748b;background:#f8fafc;border-color:#cbd5e1;border-style:dashed}
+.lc-todo{color:#475569;background:#f1f5f9;border-color:#cbd5e1}
+.lc-ok{color:#1d4ed8;background:#dbeafe;border-color:#93c5fd}
+.lc-sit{color:#92400e;background:#fef3c7;border-color:#fcd34d}
+.lc-live{color:#047857;background:#d1fae5;border-color:#6ee7b7}
 .mname .per{font-size:9px;color:#94a3b8;font-weight:500;margin-left:0;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mname .range{font-size:9px;color:#94a3b8;font-weight:700;flex:none;border:1px solid #e2e8f0;border-radius:5px;padding:0 5px}
 .mname .arr{font-size:10px;color:var(--blue);flex:none;transition:transform .2s;display:inline-block}

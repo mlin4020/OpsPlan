@@ -527,3 +527,10 @@ describe('需求台账：描述与需求文档字段贯通', () => {
     expect(muts).toMatch(/delete mo\.docUrl/);
   });
 });
+
+describe('需求台账：生命周期徽标样式契约', () => {
+  it('badge.js 产出的五个类名都能在 CSS 里找到，未设置用虚线', () => {
+    ['lc-none', 'lc-todo', 'lc-ok', 'lc-sit', 'lc-live'].forEach(c => expect(css).toContain(`.${c}{`));
+    expect(css).toMatch(/\.lc-none\{[^}]*border-style:dashed/);
+  });
+});

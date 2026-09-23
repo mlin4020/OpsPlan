@@ -6,7 +6,7 @@ import { PCOL } from '../src/core/default-data.js';
 import { barHtml, bands, msLabel, renderModView } from '../src/views/mod-view.js';
 import { milestoneName } from '../src/core/mod-tag.js';
 import { resolveModuleColors, nextModuleColor, resolveChosenColor, MODULE_PALETTE } from '../src/core/mod-color.js';
-import { priorityBadge } from '../src/views/badge.js';
+import { priorityBadge, lifecycleBadge } from '../src/views/badge.js';
 import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
 import { renderModDetailRows, renderModCard } from '../src/views/mod-card.js';
@@ -722,5 +722,21 @@ describe('views: 需求台账展开档案', () => {
     toggleReqExpanded('官网改版');
     expect(html).toContain('已上线');
     expect(html).not.toContain('赶不上');
+  });
+});
+
+describe('views: 生命周期徽标', () => {
+  it('四档各自映射到 lc-* 类名（结构固定，配色在 CSS）', () => {
+    expect(lifecycleBadge('待确认')).toBe('<span class="lc lc-todo" title="生命周期（人工维护）：待确认">待确认</span>');
+    expect(lifecycleBadge('已确认')).toContain('class="lc lc-ok"');
+    expect(lifecycleBadge('已提测')).toContain('class="lc lc-sit"');
+    expect(lifecycleBadge('已上线')).toContain('class="lc lc-live"');
+  });
+
+  it('未设置（缺字段 / 非法值）渲染 lc-none，不留空白', () => {
+    [undefined, null, '', '已上线 '].forEach(v => {
+      expect(lifecycleBadge(v)).toContain('class="lc lc-none"');
+      expect(lifecycleBadge(v)).toContain('未设置');
+    });
   });
 });
