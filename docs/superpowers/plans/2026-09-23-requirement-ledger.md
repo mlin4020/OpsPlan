@@ -2140,13 +2140,12 @@ body.readonly-mode .req-act{display:none}
   border:1px solid var(--line);border-radius:7px;padding:2px 8px}
 .req-ms b{font-variant-numeric:tabular-nums;color:#0f1729}
 .req-ms-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
-/* 窄屏：隐藏两个宽文本列，其余靠容器横向滚动兜底 */
-@media(max-width:767px){
-  .req-col-opt{display:none}
-  .req-detail{grid-template-columns:1fr}
-  .req-q{width:100%}
-}
+/* 窄屏：隐藏两个宽文本列，其余靠容器横向滚动兜底 —— 
+   ⚠️ 这 3 条必须并入文件末尾那个手机主样式块（@media(max-width:767px) 内的末尾），
+   不要另起一个 @media 块：tests/mobile-layout.test.js 的 phoneCss() 取的是
+   "文件里最后一个 ≤767px 断点"，新增块会把真正的主块挤掉，一次性打挂 4 条既有断点断言。 */
 ```
+（对应地，在手机主块内 `}` 之前追加：`.req-col-opt{display:none}` / `.req-detail{grid-template-columns:1fr}` / `.req-q{width:100%}`）
 
 - [ ] **Step 5: 跑测试确认通过**
 
