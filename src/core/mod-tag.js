@@ -30,6 +30,28 @@ export function milestoneName(b, modName) {
 }
 
 /**
+ * 关键时间点：从需求的任务条里取「需求确认」/「提测」里程碑（台账「关键时间」列用）
+ *
+ * kind: 'confirm' | 'submit'，返回里程碑 bar（含 m）或 null
+ *
+ * 为什么提测只能按 label 认：addModule 自动补建的提测里程碑是 { p:'sit', label:'提测' }，
+ * 而 p:'sit' 同时也是「测试(SIT)」这个普通阶段 —— 只判 p 会把测试任务本身取出来，
+ * 日期与语义都会错。
+ *
+ * 多个匹配取最后一个：与 core/versions.js 的 findGoMs 保持同一口径（重复里程碑以最新为准）。
+ */
+export function findGateMs(mo, kind) {
+  const bars = (mo && mo.bars) || [];
+  return bars.filter(b => {
+    if (!b || !b.m) return false;
+    const label = String(b.label || '');
+    if (kind === 'confirm') return b.p === 'cfm' || label.includes('需求确认');
+    if (kind === 'submit') return label.includes('提测');
+    return false;
+  }).pop() || null;
+}
+
+/**
  * 根据需求内任务的完成情况、逾期、进行中状态自动计算标签文本与颜色
  * 优先级：已逾期 > 已完成 > 进行中 > 待启动
  */

@@ -8,7 +8,7 @@ import {
   defaultModules, defaultResources, defaultHolidays
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
-import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag, currentPhase } from '../src/core/mod-tag.js';
+import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag, currentPhase, findGateMs } from '../src/core/mod-tag.js';
 import { modStats } from '../src/core/mod-stats.js';
 import { isOverdueTask } from '../src/core/task-status.js';
 import { planStore } from '../src/store/plan-store.js';
@@ -516,5 +516,40 @@ describe('core/default-data: 生命周期枚举与归一化', () => {
     [undefined, null, '', ' 已上线', '已上线 ', '上线', '待确认中', 0, {}].forEach(
       v => expect(normalizeLifecycle(v)).toBe(null)
     );
+  });
+});
+
+describe('core/mod-tag: findGateMs 关键时间点（需求确认 / 提测）', () => {
+  const mo = {
+    name: 'X',
+    bars: [
+      { id: 'cfm', m: '2026-08-14', p: 'cfm', label: '需求确认' },
+      { id: 'sit-task', s: '2026-08-17', e: '2026-08-21', p: 'sit', w: 5, res: [] },  // 测试任务，不是提测里程碑
+      { id: 'tice', m: '2026-08-24', p: 'sit', label: '提测' },
+      { id: 'go', m: '2026-09-09', p: 'go', label: '上线' }
+    ]
+  };
+
+  it('确认：p=cfm 或 label 含「需求确认」都能认', () => {
+    expect(findGateMs(mo, 'confirm').id).toBe('cfm');
+    expect(findGateMs({ bars: [{ m: '2026-08-15', label: '需求确认' }] }, 'confirm').m).toBe('2026-08-15');
+  });
+
+  it('提测：按 label 认，不能把 p=sit 的测试任务当成提测里程碑', () => {
+    expect(findGateMs(mo, 'submit').id).toBe('tice');
+  });
+
+  it('多个匹配取最后一个（与 findGoMs 同口径）', () => {
+    const two = { bars: [
+      { id: 'a', m: '2026-08-10', p: 'cfm', label: '需求确认' },
+      { id: 'b', m: '2026-08-20', p: 'cfm', label: '需求确认（复议）' }
+    ] };
+    expect(findGateMs(two, 'confirm').id).toBe('b');
+  });
+
+  it('没有对应里程碑 / 未知 kind / 入参为 null 都返回 null', () => {
+    expect(findGateMs({ bars: [] }, 'confirm')).toBe(null);
+    expect(findGateMs(mo, 'nope')).toBe(null);
+    expect(findGateMs(null, 'confirm')).toBe(null);
   });
 });
