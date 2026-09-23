@@ -114,10 +114,15 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
    同类坑：.mod-dot（也是从 `.mname .mod-dot` 提为独立类）。 */
 .tag{font-size:9px;font-weight:700;color:#fff;border-radius:5px;padding:1px 6px;letter-spacing:.3px;flex:none}
 .pri{display:inline-flex;align-items:center;flex:none;font-size:9px;font-weight:800;line-height:1;padding:2px 5px;border-radius:5px;border:1px solid;letter-spacing:.2px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.pri-p0{color:#b91c1c;background:#fee2e2;border-color:#fca5a5}
-.pri-p1{color:#334155;background:#eaeff6;border-color:#c6d1e0}
-.pri-p2{color:#5b6b80;background:#f5f8fc;border-color:#e2e8f0}
-.pri-p3{color:#94a3b8;background:#fbfcfe;border-color:#eef2f7}
+/* 优先级徽标配色：P0→P3 走「红 → 琥珀 → 蓝 → 灰」的冷暖梯度，紧急度一眼可辨。
+   旧配色 P1/P2/P3 是三个几乎同色的浅灰蓝，只有 P0 有颜色，实际等同于"只有 P0 和其余"。
+   形态仍保持"浅底 + 描边"（见 views/badge.js），不与实心状态标签抢读；
+   文字色按各级底色取深色档，保证 9px 加粗小字的对比度 ≥ 4.5:1（P3 旧值 #94a3b8 仅约 2.8:1）。
+   注意：这组是**数据语义色**，与主题品牌色无关，10 套主题下都保持不变。 */
+.pri-p0{color:#991b1b;background:#fee2e2;border-color:#f87171}
+.pri-p1{color:#92400e;background:#fef3c7;border-color:#fcd34d}
+.pri-p2{color:#1d4ed8;background:#dbeafe;border-color:#93c5fd}
+.pri-p3{color:#475569;background:#eef2f7;border-color:#cbd5e1}
 .mname .per{font-size:9px;color:#94a3b8;font-weight:500;margin-left:0;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mname .range{font-size:9px;color:#94a3b8;font-weight:700;flex:none;border:1px solid #e2e8f0;border-radius:5px;padding:0 5px}
 .mname .arr{font-size:10px;color:var(--blue);flex:none;transition:transform .2s;display:inline-block}
