@@ -9,7 +9,7 @@ import { resolveModuleColors, nextModuleColor, resolveChosenColor, MODULE_PALETT
 import { priorityBadge } from '../src/views/badge.js';
 import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
-import { renderModDetailRows } from '../src/views/mod-card.js';
+import { renderModDetailRows, renderModCard } from '../src/views/mod-card.js';
 import { renderReqView, toggleReqExpanded } from '../src/views/req-view.js';
 
 // 构造最小渲染 ctx（与 renderAll 的 buildViewCtx 契约对齐）
@@ -267,6 +267,42 @@ describe('views: 总览（report）待排期需求', () => {
     // 同页其他需求照常渲染
     expect(html).toContain('数据看板');
     expect(html).toContain('rtl2-bar');
+  });
+});
+
+describe('views: 应达基线（与进度填充同坐标）', () => {
+  // 条按时间轴对齐，填充却是「工作量占条宽的百分比」—— 同一根条里混了两套坐标，
+  // 计划前紧后松时填充右端会被读成时间点（"活干到 10/7 了"），看着"越过"今日线，
+  // 与已经判出来的「延期」自相矛盾。应达基线补上同坐标的参照。
+  const tightThenLoose = () => ({
+    name: '前紧后松', pri: '',
+    bars: [
+      { id: 'a', p: 'req', s: '2026-08-13', e: '2026-08-13', done: 0, res: [] }, // 已到期 → PV 全额计入
+      { id: 'b', p: 'go', s: '2026-10-01', e: '2026-10-02', done: 0, res: [] }    // 未开始 → PV 不计
+    ]
+  });
+
+  it('排期总览：基线位置走工作量口径，不是日历位置', () => {
+    const ctx = makeCtx();                       // today = 2026-08-20
+    ctx.state.modules = [tightThenLoose()];
+    const html = renderReportView(null, ctx);
+    const m = html.match(/rtl2-bar-plan" style="left:([\d.]+)%"/);
+    expect(m).not.toBeNull();
+    const left = Number(m[1]);
+    // 工作量口径：已到期的 1 人日 / 共 3 人日 ≈ 33.3%
+    expect(left).toBeGreaterThan(30);
+    expect(left).toBeLessThan(37);
+    // 日历口径（旧「今日（应达）」线的算法）只有 (8/20−8/13)/(10/2−8/13) ≈ 14%，两者必须区分开
+    expect(left).toBeGreaterThan(20);
+  });
+
+  it('需求卡片：同时保留今日线（日历）与应达基线（工作量）', () => {
+    const ctx = makeCtx();
+    const card = renderModCard(tightThenLoose(), ctx);
+    expect(card).toContain('rmod-bar-plan');
+    expect(card).toContain('rmod-bar-today');    // 今日线标的是日历位置，本身没错，保留
+    const m = card.match(/rmod-bar-plan" style="left:([\d.]+)%"/);
+    expect(Number(m[1])).toBeGreaterThan(30);    // ≈33.3%，而非日历 14%
   });
 });
 

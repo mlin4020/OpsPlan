@@ -112,8 +112,14 @@ export function renderReportView(container, ctx) {
     // 进度填充色：正常/超前=标准绿(green-600)，延期=标准红(red-600)；条底色由CSS统一控制
     // 对比度：空条与轨道背景差异明显，填充色与空条对比度>4.5:1，完全解决与背景融合问题
     const fillColor = st === 'late' ? '#dc2626' : '#16a34a';
-    const barHtml = rng ? `<div class="rtl2-bar ${st}" style="left:${pct(rng.start).toFixed(1)}%;width:${Math.max(0.5, pct(rng.end) - pct(rng.start)).toFixed(1)}%" title="${mo.name} · 完成 ${mp.toFixed(0)}% / 时间进度 ${planPct.toFixed(0)}%${stTxt}">
+    // 条内填充是「已完成工作量占条宽的百分比」，而条本身按时间轴对齐 —— 同一根条里混了两套坐标：
+    // 填充右端会被读成时间点（"活干到 10/7 了"），于是计划前紧后松时，74% 的填充看着"越过了"47% 处的今日线，
+    // 与已经判定出来的「延期」自相矛盾。按图例原意补回应达基线（今天按计划该完成的工作量占比），
+    // 它与填充同坐标、可直接比出落后多少。（.rtl2-bar-plan 样式早已备好，只是没被渲染输出）
+    const barPlanHtml = (rng && mWork) ? `<i class="rtl2-bar-plan" style="left:${Math.min(100, Math.max(0, planPct)).toFixed(1)}%" title="按计划今日应达 ${planPct.toFixed(1)}%"></i>` : '';
+    const barHtml = rng ? `<div class="rtl2-bar ${st}" style="left:${pct(rng.start).toFixed(1)}%;width:${Math.max(0.5, pct(rng.end) - pct(rng.start)).toFixed(1)}%" title="${mo.name} · 完成 ${mp.toFixed(0)}% / 应达 ${planPct.toFixed(0)}%${stTxt}">
       <div class="rtl2-bar-progress" style="width:${Math.min(100, mp).toFixed(1)}%;background:${fillColor}"></div>
+      ${barPlanHtml}
     </div>`
       : `<span class="rtl2-empty">暂无任务</span>`;
     const msItems = (mo.bars || []).filter(b => b.m).map(ms => {
@@ -247,7 +253,8 @@ export function renderReportView(container, ctx) {
     <div class="mtl">
       <div class="mtl-legend">
         <span class="k prog"><i></i>完成进度</span>
-        <span class="k today"><b></b>今日（应达）</span>
+        <span class="k plan"><i></i>应达基线</span>
+        <span class="k today"><b></b>今日</span>
         <span class="k tice"><i></i>提测</span>
         <span class="k go"><i></i>待上线</span>
         <span class="k on"><i></i>已上线</span>
@@ -260,6 +267,7 @@ export function renderReportView(container, ctx) {
       <div class="rtl2-body">${rowsHtml}</div>
       <div class="rtl2-legend">
         <span class="k today"><b></b>今日</span>
+        <span class="k plan"><i></i>应达</span>
         <span class="k prog"><i></i>正常/超前</span>
         <span class="k late"><i></i>延期</span>
         <span class="k tice"><i></i>提测卡点</span>

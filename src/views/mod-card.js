@@ -110,6 +110,11 @@ export function renderModCard(mo, ctx, opts = {}) {
   const detailRows = open ? renderModDetailRows(mo, ctx) : '';
 
   const barTodayHtml = rng ? `<i class="rmod-bar-today" style="left:${todayPos.toFixed(1)}%"></i>` : '';
+  // 应达基线：今天按计划该完成的工作量占比。它与上面的「今日线」不是一回事 ——
+  // 今日线标的是"日历走到哪"（条按时间轴对齐），填充标的是"活干了多少"（工作量占比）。
+  // 两套坐标并排看必误判：计划前紧后松时填充会"越过"今日线，看着像超前，实际却落后。
+  // 补上同坐标的基线，读者才有可比的参照。
+  const barPlanHtml = (rng && mWork) ? `<i class="rmod-bar-plan" style="left:${Math.max(0, Math.min(100, planPct)).toFixed(1)}%" title="按计划今日应达 ${planPct.toFixed(1)}%"></i>` : '';
   // 进度填充色：与排期总览一致 —— 正常/超前=标准绿(green-600)，延期=标准红(red-600)
   const fillColor = st === 'late' ? '#dc2626' : '#16a34a';
   return `
@@ -125,6 +130,7 @@ export function renderModCard(mo, ctx, opts = {}) {
     </div>
     <div class="rmod-bar ${st}">
       <div class="rmod-bar-fill" style="width:${mp.toFixed(1)}%;background:${fillColor}"></div>
+      ${barPlanHtml}
       ${barTodayHtml}
       ${msMarkers}
     </div>

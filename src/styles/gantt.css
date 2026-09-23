@@ -755,6 +755,8 @@ body.work-view .msheet-item[data-zoom-only]{display:none}
 .mtl-legend .k i{display:inline-block;border-radius:2px}
 .mtl-legend .k.prog i{width:13px;height:9px;background:#16a34a}
 .mtl-legend .k.today b{width:12px;border-top:2px dashed var(--red)}
+/* 应达基线图例：与 .rtl2-legend .k.plan 同一枚样式（条内竖线），两处图例要一眼对上 */
+.mtl-legend .k.plan i{width:2px;height:12px;background:#fff;box-shadow:0 0 0 1px #0f172a4d}
 .mtl-legend .k.tice i{width:9px;height:9px;transform:rotate(45deg);background:#f59e0b}
 .mtl-legend .k.go i{width:9px;height:9px;transform:rotate(45deg);background:#dc2626}
 .mtl-legend .k.on i{width:9px;height:9px;transform:rotate(45deg);background:#16a34a}
