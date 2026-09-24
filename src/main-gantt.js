@@ -20,11 +20,6 @@ import { planRequirementBackfill } from './core/backfill.js';
 // 历史数据回填时统一写入的提出人。这是具体的业务值（不是技术默认值），
 // 所以放在入口层而不是 core 常量里 —— core/backfill.js 只认调用方传什么。
 const BACKFILL_PROPOSED_BY = '郑致远';
-
-// 「已询问 / 已回填过」的本地标记：避免每次打开页面都弹确认。
-// 用 localStorage 而不是写进 plan：它是"这台机器问过了"的界面状态，
-// 不该跟着数据同步到别的用户（每位使用者首次打开都该被问一次）。
-const BACKFILL_FLAG = 'opsplan.backfill.reqMeta.v1';
 import { createScheduler } from './scheduler/index.js';
 import { bindAll } from './components/index.js';
 import { buildShellHTML, showFullLoading } from './components/shell.js';
@@ -144,59 +139,28 @@ function boot() {
     if (ui) ui.afterRender();
   }
 
-  // ---- 历史需求元信息回填（一次性）----
-  // 两个入口：
-  //   1) URL 带 &backfill=1 → 直接执行，不弹确认（已知需要时走这条）
-  //   2) 平时自动检测：有需求缺「提出人 / 提出时间 / 生命周期」时**问一次**，用户点了才补
+  // ---- 历史需求元信息回填（自动、幂等）----
+  // 打开页面就执行，不需要任何操作，也不弹提示。
   //
-  // 为什么问而不是直接补：这是替用户写数据。「郑致远」「待确认」这类具体值属于业务决定，
-  // 不该静默落到每条需求上；而且一旦变成"每次启动都自动补"，用户以后新建需求时
-  // 忘了填提出人，也会被静默盖上同一个名字。
-  // 为什么只问一次（localStorage 标记）：补完就不再需要；点了取消也不该每次刷新都烦他。
-  function maybeBackfillRequirementMeta() {
-    let forced = false;
-    try {
-      forced = new URLSearchParams(location.search).get('backfill') === '1';
-    } catch (e) { /* URL 异常时当作没请求 */ }
-
-    if (!forced) {
-      try { if (localStorage.getItem(BACKFILL_FLAG)) return; } catch (e) { return; }
-    }
+  // 安全边界全部在 core/backfill.js 的 isLegacyMeta 里：只处理「提出人 / 提出时间 /
+  // 生命周期」三项目全空的需求 —— 这三项都是后加的，全空即说明该需求建于它们上线之前；
+  // 而新建需求时弹窗会给默认提出时间（今天）与默认生命周期（待确认），因此不会被误补，
+  // 用户以后新建需求时忘了填提出人也不会被静默盖上同一个名字。
+  //
+  // 也正因为判据落在数据本身，不需要任何"已回填"标记：补完后三项目都有值，
+  // 下次启动自然是 0 条变更，天然幂等。
+  function backfillRequirementMeta() {
     if (userStore.state.readonly) return;
-
     const plan = planRequirementBackfill(planStore.state.modules, {
       proposedBy: BACKFILL_PROPOSED_BY,
       today: new Date(),
       state: planStore.state
     });
-    if (!plan.length) {
-      // 数据已完整：记下标记，以后不再检测
-      try { localStorage.setItem(BACKFILL_FLAG, '1'); } catch (e) { /* 忽略 */ }
-      return;
-    }
-    if (!forced) {
-      const ok = confirm(
-        `检测到 ${plan.length} 个历史需求缺少「提出人 / 提出时间 / 生命周期」。\n\n`
-        + `是否立即补全？\n`
-        + `· 提出人统一填「${BACKFILL_PROPOSED_BY}」\n`
-        + `· 提出时间取该需求最早任务的开始日\n`
-        + `· 生命周期按当前进度推导\n\n`
-        + `只补空缺、不覆盖已有值；补完可在需求台账里直接修改。`
-      );
-      try { localStorage.setItem(BACKFILL_FLAG, '1'); } catch (e) { /* 忽略 */ }
-      if (!ok) return;
-    }
+    if (!plan.length) return;
     // updateModule 是 patch 语义（只传 oldName + 要改的字段），内部会走 assertEditable
     // 与归一化；save() 有 300ms 防抖，N 条只落盘一次
     plan.forEach(({ name, patch }) => sched.updateModule({ oldName: name, ...patch }));
-    if (forced) {
-      try {
-        const url = new URL(location.href);
-        url.searchParams.delete('backfill');
-        history.replaceState(null, '', url);
-      } catch (e) { /* 忽略 */ }
-    }
-    ui.onSyncStatus('ok', { msg: `已回填 ${plan.length} 个需求的历史信息` });
+    ui.onSyncStatus('ok', { msg: `已补全 ${plan.length} 个历史需求的提出信息与生命周期` });
   }
 
   // 只读状态（进入项目后由 editable 判定写入）
@@ -273,7 +237,7 @@ function boot() {
       }
       hideLoading();
       // 数据就位后再回填，避免在空数据上算出一堆空值
-      maybeBackfillRequirementMeta();
+      backfillRequirementMeta();
     });
   }
 

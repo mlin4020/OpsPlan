@@ -57,27 +57,43 @@ export function inferLifecycle(mo, ctx) {
 }
 
 /**
+ * 三项目是否全空 —— 判断"这条需求建于三个字段上线之前"。
+ *
+ * 这是「只在历史数据上回填、绝不误伤新需求」的关键判据：
+ * 新建需求时弹窗会给默认提出时间（今天）与默认生命周期（待确认），
+ * 所以**新建需求不会三项目全空**。反过来说，缺个别字段（比如只忘了填提出人）
+ * 说明用户已经动过这三项，不该再被自动改。
+ *
+ * 有了它就不需要任何"已回填"标记：补完之后三项目都有值，下次启动自然是 0 条变更，
+ * 天然幂等，也不怕换机器 / 清缓存。
+ */
+function isLegacyMeta(mo) {
+  return !String(mo.proposedBy || '').trim()
+    && !String(mo.proposedAt || '').trim()
+    && !mo.lifecycle;
+}
+
+/**
  * 算出需要回填的 patch 列表。
  *
  * @param {Array} mods 全量需求
  * @param {{proposedBy:string, today:Date, state:object}} ctx
- * @returns {Array<{name:string, patch:object}>} 只含确实要改的需求（已填好的不出现）
+ * @returns {Array<{name:string, patch:object}>} 只含确实要改的需求
  */
 export function planRequirementBackfill(mods, ctx) {
   const proposedBy = String((ctx && ctx.proposedBy) || '').trim();
   const out = [];
   (mods || []).forEach(mo => {
-    if (!mo || !mo.name) return;
+    if (!mo || !mo.name || !isLegacyMeta(mo)) return;
     const patch = {};
-    // 提出人：只在为空且调用方给了值时才补（"郑致远"这类具体值属于业务决定，不进 core 常量）
-    if (proposedBy && !String(mo.proposedBy || '').trim()) patch.proposedBy = proposedBy;
-    // 提出时间：取不到最早任务开始日就留空（待排期需求属于这种情况）
-    if (!String(mo.proposedAt || '').trim()) {
-      const at = earliestTaskStart(mo);
-      if (at) patch.proposedAt = at;
-    }
-    if (!mo.lifecycle) patch.lifecycle = inferLifecycle(mo, ctx);
-    if (Object.keys(patch).length) out.push({ name: mo.name, patch });
+    // 提出人：调用方给了值才补（"郑致远"这类具体值属于业务决定，不进 core 常量）
+    if (proposedBy) patch.proposedBy = proposedBy;
+    // 提出时间：取不到最早任务开始日就不补这一项（待排期需求属于这种情况），
+    // 但其余两项照常补 —— 不必为了凑齐三项而放弃整条
+    const at = earliestTaskStart(mo);
+    if (at) patch.proposedAt = at;
+    patch.lifecycle = inferLifecycle(mo, ctx);
+    out.push({ name: mo.name, patch });
   });
   return out;
 }

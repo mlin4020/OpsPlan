@@ -604,7 +604,7 @@ describe('core: 历史需求元信息回填（一次性）', () => {
   });
 
   describe('planRequirementBackfill', () => {
-    it('只补缺失字段，已有值原样保留（重复执行安全）', () => {
+    it('三项目全空的历史需求才补；补完三项目都有值（重复执行安全）', () => {
       const mods = [
         // 三项全空 → 三项都补
         { name: '全空', bars: [{ id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-18', done: 0 }] },
@@ -620,7 +620,19 @@ describe('core: 历史需求元信息回填（一次性）', () => {
       });
     });
 
-    it('待排期需求：提出时间取不到就留空，不补假值', () => {
+    it('只缺一两个字段的需求不动它（回归：新建需求的提出人被静默盖成郑致远）', () => {
+      // 新建需求时弹窗会给默认提出时间（今天）与默认生命周期（待确认）→ 不会三项目全空。
+      // 因此"缺个别字段"只可能是用户已经动过这三项，绝不能被自动改。
+      const bars = [{ id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-18', done: 0 }];
+      const mods = [
+        { name: '只缺提出人', proposedAt: '2026-09-24', lifecycle: '待确认', bars },   // 新建后的典型形态
+        { name: '只缺生命周期', proposedBy: '张三', proposedAt: '2026-09-24', bars },
+        { name: '只缺提出时间', proposedBy: '张三', lifecycle: '已确认', bars }
+      ];
+      expect(planRequirementBackfill(mods, ctx)).toEqual([]);
+    });
+
+    it('待排期需求：提出时间取不到就不补这一项，其余两项照常补', () => {
       const plan = planRequirementBackfill([{ name: '待排期', bars: [] }], ctx);
       expect(plan[0].patch.proposedBy).toBe('郑致远');
       expect('proposedAt' in plan[0].patch).toBe(false);
