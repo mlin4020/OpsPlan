@@ -959,7 +959,14 @@ body.readonly-mode .ver-act{display:none}
 .req-pbar i.late{background:#dc2626}
 /* 已归档需求：不参与健康度评判，进度条转中性色（不留红而不写原因，那样更困惑） */
 .req-pbar i.archived{background:#94a3b8}
+/* 进度块：独立成列时是 td，合并进「排期与进度」后变成第二行的 span */
 .req-c-pct{white-space:nowrap}
+/* 排期与进度合并列：排期区间在上、完成度在下，整体允许换行 */
+.req-c-plan{white-space:normal}
+.req-c-plan .req-c-pct{display:block;margin-top:3px}
+/* 上线情况允许换行：状态徽标 + 计划 / 实际日期 + 「赶不上」提示，窄列时折成多行 */
+.req-c-ship{white-space:normal}
+.req-c-ship .tag{white-space:nowrap}
 /* 偏差文字：与卡片 .rmod-devi 同一套语义色 */
 .req-devi{margin-left:6px;font-size:10.5px;font-weight:800;font-variant-numeric:tabular-nums}
 .req-devi.late{color:#dc2626}
@@ -967,6 +974,26 @@ body.readonly-mode .ver-act{display:none}
 .req-devi.on{color:#64748b}
 .req-late{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:800;color:#b91c1c;background:#fef2f2;
   border:1px solid #fecaca;border-radius:6px;padding:1px 6px;white-space:nowrap}
+/* ============ 台账行内编辑（生命周期 / 提出人）============
+   展示版与编辑版同时渲染，按只读状态二选一 —— 与操作列 .req-act 同一套机制
+   （body.readonly-mode 由 utils/readonly.js 维护），渲染层因此不必知道只读。 */
+.req-inline-edit{display:none}
+body:not(.readonly-mode) .req-inline-edit{display:inline-flex;align-items:center;gap:5px}
+body:not(.readonly-mode) .req-inline-view{display:none}
+
+/* 提出人：平时看起来就是一段文字，悬停 / 聚焦才显出可编辑，避免整张表变成表单 */
+.req-inline-by{width:96px;font-size:11.5px;font-weight:700;color:#334155;
+  background:transparent;border:1px solid transparent;border-radius:5px;padding:2px 4px}
+.req-inline-by:hover{background:#f8fafc;border-color:#e2e8f0}
+.req-inline-by:focus{background:#fff;border-color:var(--accent);outline:none}
+.req-inline-by::placeholder{color:#cbd5e1;font-weight:500}
+
+/* 生命周期：披着 .lc 徽标的皮（配色复用同一套类），去掉系统箭头后自绘一个小三角 */
+.req-inline-lc{display:inline-block;appearance:none;-webkit-appearance:none;cursor:pointer;
+  padding-right:15px;background-repeat:no-repeat;background-position:right 3px center;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M1.5 3L4 5.5L6.5 3' fill='none' stroke='%2364748b' stroke-width='1.2' stroke-linecap='round'/></svg>")}
+.req-inline-lc:focus{outline:2px solid var(--accent);outline-offset:1px}
+
 .req-ops{white-space:nowrap}
 .req-ops .btn{margin-right:4px}
 /* 操作列图标按钮：原来「编辑 / 归档 / 删除」三个文字按钮在 12 列的表里太占宽度，

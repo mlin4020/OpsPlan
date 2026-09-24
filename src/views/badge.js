@@ -24,7 +24,9 @@ export const versionBadge = v => (v && v.name
 // 生命周期徽标：与 priorityBadge 同一分工（只出结构，配色在 CSS 的 .lc-*）。
 // 差别：未设置也渲染徽标 —— 台账该列不允许出现空白，
 // 空白会让读者分不清"没填"和"渲染坏了"。
-const LC_CLASS = { '待确认': 'lc-todo', '已确认': 'lc-ok', '已提测': 'lc-sit', '已上线': 'lc-live' };
+// 导出供台账行内编辑复用：那里的 <select> 需要披上同一套配色类，
+// 否则同一个值在「浏览形态」与「编辑形态」下会显示成两种颜色
+export const LC_CLASS = { '待确认': 'lc-todo', '已确认': 'lc-ok', '已提测': 'lc-sit', '已上线': 'lc-live' };
 
 export const lifecycleBadge = v => {
   const key = MODULE_LIFECYCLE.includes(v) ? v : null;

@@ -14,12 +14,12 @@
 // 它是界面临时状态，不该进 planStore（否则污染导出 / 同步 / 撤销）。
 // ============================================================
 import { F, fmtD } from '../core/dates.js';
-import { PCOL, PNAME, MODULE_LIFECYCLE } from '../core/default-data.js';
+import { PCOL, PNAME, MODULE_LIFECYCLE, LIFECYCLE_NONE } from '../core/default-data.js';
 import { moduleTag, currentPhase, computeModulePer, progressDeviation, findGateMs } from '../core/mod-tag.js';
 import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
-import { filterMods, sortMods } from '../core/mod-query.js';
+import { filterMods, sortMods, collectProposers } from '../core/mod-query.js';
 import { modStats, renderModDetailRows } from './mod-card.js';
-import { priorityBadge, lifecycleBadge } from './badge.js';
+import { priorityBadge, lifecycleBadge, LC_CLASS } from './badge.js';
 
 const reqExpanded = new Set();
 
@@ -91,11 +91,25 @@ function docCell(mo) {
 function proposedCell(mo) {
   const by = (mo.proposedBy || '').trim();
   const at = (mo.proposedAt || '').trim();
-  if (!by && !at) return '<span class="req-muted">—</span>';
-  return [
-    by ? `<b class="req-prop">${esc(by)}</b>` : '',
-    at ? `<span class="req-sub">${fmtD(F(at))}</span>` : ''
-  ].filter(Boolean).join(' ');
+  const timeTxt = at ? `<span class="req-sub">${fmtD(F(at))}</span>` : '';
+  // 提出人支持行内直接改：展示版与编辑版同时渲染，由 CSS 按只读状态二选一
+  // （body.readonly-mode 下只露展示版，与操作列 `.req-act` 同一套机制，渲染层不必知道只读）
+  return `<span class="req-inline-view">${by ? `<b class="req-prop">${esc(by)}</b>` : '<span class="req-muted">—</span>'}</span>` +
+    `<span class="req-inline-edit"><input class="req-inline req-inline-by" type="text" list="reqProposerList"`
+    + ` data-req-inline="proposedBy" data-name="${esc(mo.name)}" data-prev="${esc(by)}" value="${esc(by)}"`
+    + ` placeholder="未填写" title="直接修改提出人（回车或点别处生效）"></span>` + timeTxt;
+}
+
+// 生命周期行内编辑：用原生 <select> 定制成徽标外观（配色复用 .lc-* 族，去掉系统箭头）。
+// 为什么不用自绘下拉：原生控件键盘可达、移动端是熟悉的滚轮，且不需要额外的开合状态。
+function lifecycleSelect(name, cur) {
+  const v = MODULE_LIFECYCLE.includes(cur) ? cur : '';
+  const opts = ['', ...MODULE_LIFECYCLE]
+    .map(o => `<option value="${esc(o)}"${o === v ? ' selected' : ''}>${o || LIFECYCLE_NONE}</option>`)
+    .join('');
+  return `<select class="req-inline req-inline-lc lc ${LC_CLASS[v] || 'lc-none'}"`
+    + ` data-req-inline="lifecycle" data-name="${esc(name)}" data-prev="${esc(v)}"`
+    + ` title="直接改生命周期（人工维护，与左侧自动计算的「状态」不是一回事）">${opts}</select>`;
 }
 
 // 关键时间：需求确认 / 提测两个卡点的日期（不新增字段，实时读排期里程碑）
@@ -143,17 +157,22 @@ function rowHtml(mo, ctx) {
     <td class="req-c-name">${priorityBadge(mo.pri)}<b>${esc(mo.name)}</b>${archFlag}</td>
     <td class="req-col-opt">${proposedCell(mo)}</td>
     <td><span class="tag" style="background:${tagc}">${tag}</span></td>
-    <td class="req-c-lc">${lifecycleBadge(mo.lifecycle)}</td>
+    <td class="req-c-lc">
+      <span class="req-inline-view">${lifecycleBadge(mo.lifecycle)}</span>
+      <span class="req-inline-edit">${lifecycleSelect(mo.name, mo.lifecycle)}</span>
+    </td>
     <td class="req-col-opt">${docCell(mo)}</td>
     <td>${ver ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>` : '<span class="req-muted">未加入版本</span>'}</td>
-    <td>${rng ? `<span class="req-sub">${fmtD(rng.start)}~${fmtD(rng.end)}</span>` : `<span class="req-muted">${mo.unscheduled ? '待排期' : '—'}</span>`}</td>
-    <td class="req-c-gate">${gateCell(mo)}</td>
-    <td class="req-c-pct">
-      <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
-      <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
-      ${deviTxt ? `<span class="req-devi ${stCls}" title="实际完成度 ${st.pct.toFixed(1)}% − 计划应达 ${st.planPct.toFixed(1)}%（PV 按各任务的计划窗口算）">${deviTxt}</span>` : ''}
+    <td class="req-c-plan">
+      <span class="req-sub">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : (mo.unscheduled ? '待排期' : '—')}</span>
+      <span class="req-c-pct">
+        <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
+        <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
+        ${deviTxt ? `<span class="req-devi ${stCls}" title="实际完成度 ${st.pct.toFixed(1)}% − 计划应达 ${st.planPct.toFixed(1)}%（PV 按各任务的计划窗口算）">${deviTxt}</span>` : ''}
+      </span>
     </td>
-    <td>${shipCell(ship)}</td>
+    <td class="req-c-gate">${gateCell(mo)}</td>
+    <td class="req-c-ship">${shipCell(ship)}</td>
     <td class="req-ops req-act">
       <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">✎</button>
       <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? '↩' : '🗄'}</button>
@@ -222,7 +241,9 @@ function detailHtml(mo, ctx) {
   // 展开区是"细读"场景，措辞要给全：已完成的需求不报偏差，直接说「已完成」
   const deviTxt = !st.work ? '' : (dev.finished ? '已完成' : (dev.label || '按计划'));
 
-  return `<tr class="req-detail-tr"><td colspan="12">
+  // colspan 给一个明显大于当前列数（10）的值：浏览器会自动收敛到实际列数，
+  // 以后增删列就不必回来同步这个数字（它已经从 9 漂到 12 过一次）
+  return `<tr class="req-detail-tr"><td colspan="20">
     <div class="req-detail">
       <div class="req-detail-sec" data-req-sec="propose">
         <h5>提出与生命周期</h5>
@@ -308,6 +329,7 @@ export function renderReqView(container, ctx) {
 
   return `<div class="report-wrap req-wrap">
     ${head}
+    <datalist id="reqProposerList">${collectProposers(all).map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist>
       <div class="req-scroll">
         <table class="req-table">
           <thead><tr>
@@ -317,9 +339,8 @@ export function renderReqView(container, ctx) {
             ${th('lifecycle', '生命周期', '', '人工维护的流程门，与左侧自动计算的「状态」不是同一件事')}
             <th class="req-col-opt" title="有需求文档链接时显示可点入口；无则「—」">文档</th>
             ${th('version', '所属版本')}
-            ${th('start', '排期')}
+            ${th('start', '排期与进度', '', '排期区间 + 完成度（含与计划的偏差）；点击按排期起点排序')}
             ${th('confirm', '关键时间', '', '需求确认 / 提测两个卡点的排期日期；点击按需求确认时间排序，缺里程碑的排最后')}
-            ${th('pct', '进度')}
             ${th('ship', '上线情况')}
             <th class="req-act">操作</th>
           </tr></thead>

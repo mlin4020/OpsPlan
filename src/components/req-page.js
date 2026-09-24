@@ -15,6 +15,9 @@
 // ============================================================
 import { defaultReqFilter, defaultReqSort } from '../core/mod-query.js';
 
+// 行内编辑字段的中文名（提示文案用；未列出的字段只提示「已更新」）
+const INLINE_LABEL = { lifecycle: '生命周期', proposedBy: '提出人' };
+
 export function bindReqPage(deps) {
   const g = deps && deps.gantt;
   const vs = deps && deps.viewState;
@@ -57,9 +60,44 @@ export function bindReqPage(deps) {
     apply();
   });
 
+  // 行内编辑提交：只写真正变过的字段；失败时把控件回滚成原值，避免界面与数据不一致。
+  // 生命周期下拉与提出人输入框都用 change —— 原生语义就是"值确定了"（输入框在失焦时触发）。
+  const commitInline = (el) => {
+    if (deps.isReadonly && deps.isReadonly()) return;
+    const field = el.dataset.reqInline;
+    const name = el.dataset.name;
+    const prev = el.dataset.prev == null ? '' : el.dataset.prev;
+    const next = String(el.value == null ? '' : el.value).trim();
+    // 没变就不写、不重绘：否则每次点开下拉再关掉都会触发一次无谓的保存
+    if (next === prev) return;
+    try {
+      deps.sched.updateModule({ oldName: name, [field]: next });
+      deps.render();
+      deps.toast(INLINE_LABEL[field] ? `已更新${INLINE_LABEL[field]}` : '已更新');
+    } catch (err) {
+      el.value = prev;
+      deps.toast(err.message);
+    }
+  };
+
+  // 提出人输入框：回车即提交。change 只在失焦时触发，不处理回车会让用户以为没生效
+  g.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    const inline = t && t.closest ? t.closest('[data-req-inline]') : null;
+    if (!inline) return;
+    e.preventDefault();
+    commitInline(inline);
+  });
+
   // 下拉筛选：换范围 → 回到顶部
+  // 行内编辑必须先判：它与筛选下拉一样都落在 change 上
   g.addEventListener('change', e => {
-    const el = e.target && e.target.closest ? e.target.closest('[data-req-f]') : null;
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const inline = t.closest('[data-req-inline]');
+    if (inline) { commitInline(inline); return; }
+    const el = t.closest('[data-req-f]');
     if (!el) return;
     curF()[el.dataset.reqF] = el.value || 'all';
     apply({ top: true });
@@ -70,10 +108,12 @@ export function bindReqPage(deps) {
     if (!t || !t.closest) return;
 
     // ---- 只读模式下也要能用的：展开 / 收起、排序、重置 ----
-    // ⚠ 行内操作按钮（编辑 / 归档 / 删除）就在 <tr data-req-row> 内部，
-    //    所以展开判定必须先排除它们：否则 closest('[data-req-row]') 先命中，
-    //    "点编辑"会被当成"展开 / 收起"，四个行操作全部失效（回归见 tests/req-page.test.js）。
-    const hitAct = !!(t.closest('[data-req-edit]') || t.closest('[data-req-archive]') || t.closest('[data-req-del]'));
+    // ⚠ 行内操作按钮（编辑 / 归档 / 删除）与行内编辑控件（生命周期下拉 / 提出人输入框）
+    //    都在 <tr data-req-row> 内部，所以展开判定必须先排除它们：否则 closest('[data-req-row]')
+    //    先命中，"点编辑"会被当成"展开 / 收起"，行操作与行内编辑全部失效
+    //    （回归见 tests/req-page.test.js）。
+    const hitAct = !!(t.closest('[data-req-edit]') || t.closest('[data-req-archive]') || t.closest('[data-req-del]')
+      || t.closest('[data-req-inline]'));
     const row = hitAct ? null : t.closest('[data-req-row]');
     if (row) { toggleExpand(row.dataset.reqRow); return; }
 

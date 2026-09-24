@@ -491,7 +491,7 @@ describe('views: 需求台账主行表格', () => {
     const html = renderReqView(null, makeReqCtx());
     expect(html).toContain('req-wrap');
     expect(html).toContain('class="req-table"');
-    ['需求', '提出', '状态', '生命周期', '文档', '所属版本', '排期', '关键时间', '进度', '上线情况', '操作']
+    ['需求', '提出', '状态', '生命周期', '文档', '所属版本', '排期与进度', '关键时间', '上线情况', '操作']
       .forEach(h => expect(html).toContain(h));
     // 描述已不再单列（收进展开档案），主行只留文档入口，避免空列白占宽度
     expect(html).not.toContain('<th class="req-col-opt">描述</th>');
@@ -526,6 +526,27 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('class="req-doc"');
     expect(html).toContain('需求文档');
     expect(html).toContain('rel="noopener noreferrer"');   // 外链必须带 noopener
+  });
+
+  it('生命周期与提出人支持行内编辑（展示版与编辑版同时渲染，由 CSS 二选一）', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].lifecycle = '已确认';
+    ctx.state.modules[0].proposedBy = '张三';
+    const html = renderReqView(null, ctx);
+
+    expect(html).toContain('req-inline-view');                 // 展示版（只读时露出的那份）
+    expect(html).toContain('data-req-inline="lifecycle"');
+    expect(html).toContain('data-req-inline="proposedBy"');
+    // 当前值要预选 / 回填，原值记进 data-prev —— 提交时靠它判断「有没有真的变」
+    expect(html).toContain('data-prev="已确认"');
+    expect(html).toContain('data-prev="张三"');
+    expect(html).toMatch(/<option value="已确认" selected/);
+    expect(html).toContain('value="张三"');
+    // 「未设置」档必须在：否则编辑一次老数据就会把「未设置」悄悄变成「待确认」
+    expect(html).toContain('<option value="">未设置</option>');
+    // 提出人候选来自全量需求的已有值（不是写死在 HTML 里）
+    expect(html).toContain('<datalist id="reqProposerList">');
+    expect(html).toContain('<option value="张三"></option>');
   });
 
   it('筛选后计数反映筛选结果', () => {
@@ -657,8 +678,9 @@ describe('views: 需求台账展开档案', () => {
     expect(html).toContain('req-detail-tr');
     ['propose', 'desc', 'doc', 'ship', 'progress', 'phases', 'ms']
       .forEach(s => expect(html).toContain(`data-req-sec="${s}"`));
-    // 档案行的 colspan 必须覆盖全部 12 列（少一列会让详情区错位）
-    expect(html).toContain('colspan="12"');
+    // 档案行的 colspan 给的是远超实际列数的值（浏览器会自动收敛到实际列数），
+    // 这样以后增删列就不必回来同步这个数字 —— 它已经从 9 漂到 12 过一次
+    expect(html).toContain('colspan="20"');
   });
 
   it('展开档案的「提出与生命周期」里，提测取里程碑而不是 SIT 任务', () => {
@@ -825,16 +847,17 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect(html).toContain('req-muted">—');
   });
 
-  it('列头数与主行单元格数一致（11 列，防止加列时只改一半）', () => {
-    // 从 12 列收到 11 列：删掉「描述」列（描述收进展开档案，主行只留文档入口）
+  it('列头数与主行单元格数一致（10 列，防止加列时只改一半）', () => {
+    // 12 → 11：删掉「描述」列（描述收进展开档案，主行只留文档入口）
+    // 11 → 10：「排期」与「进度」合并成一列（区间在上、完成度在下）
     const ctx = makeReqCtx();
     ctx.state.modules = [{ name: '单条', bars: [] }];
     const html = renderReqView(null, ctx);
     const thead = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
     const tbody = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
     // 用 /<th[\s>]/ 而不是 /<th/：后者会把 <thead> 也算成一个列头
-    expect((thead.match(/<th[\s>]/g) || []).length).toBe(11);
-    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(11);
+    expect((thead.match(/<th[\s>]/g) || []).length).toBe(10);
+    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(10);
   });
 
   it('筛选条有生命周期下拉，含四档选项与「未设置」', () => {
