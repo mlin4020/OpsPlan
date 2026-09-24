@@ -15,6 +15,8 @@
 import { openModContextMenu, openResContextMenu, openTaskContextMenu } from './menu-actions.js';
 import { openTaskDrawer } from './task-drawer.js';
 import { updateProblemBadge } from './problem-drawer.js';
+import { toggleModCollapsed } from '../core/mod-fold.js';
+import { scrollToModStart } from './gantt-scroll.js';
 
 // 行级拖动排序状态（同一时刻只可能有一个）
 let rowDrag = null;
@@ -176,8 +178,12 @@ export function bindGanttInteractions(deps) {
       if (e.target.closest('.mod-edit-btn')) return;
       if (rowDragActive) return;
       const name = el.dataset.mod;
-      deps.viewState.collapsed[name] = !deps.viewState.collapsed[name];
+      const collapsedNow = toggleModCollapsed(deps.viewState.collapsed, name);
       deps.render();
+      // 展开后才定位：这个页面默认全折叠，横向滚动条多半停在项目开头，
+      // 而这条需求的任务可能排在两三个月之后 —— 不定位的话展开完还是看不到任务。
+      // 必须在 render 之后（render 会把 innerHTML 换掉并回填旧的滚动位置）
+      if (!collapsedNow) scrollToModStart(deps, name);
     });
     // 右击快捷选项卡：需求泳道弹出新增任务/新建需求/编辑/折叠/删除菜单
     el.addEventListener('contextmenu', (e) => {

@@ -348,11 +348,25 @@ ${mobileSheetHTML()}
       <input type="text" id="newModProposedBy" list="modProposerList">
       <datalist id="modProposerList"></datalist>
     </div>
+    <!-- 提出时间：整块（文字 + 图标）都可点，点哪儿都弹日期选择器。
+         原生 date 只有右侧那枚 small 图标能唤起 picker，中间的文字区点了没反应 ——
+         这是这一栏最常见的"点了没反应"投诉。showPicker() 由 JS 代理（见 modals.js）。 -->
     <div class="f-row">
       <label>提出时间<span class="phase-tip">新建默认今天，可改可清空</span></label>
-      <input type="date" id="newModProposedAt">
+      <div class="date-field">
+        <input type="date" id="newModProposedAt">
+        <span class="df-ic" aria-hidden="true"></span>
+      </div>
     </div>
-    <div class="f-row"><label>描述<span class="phase-tip">给领导 / 业务看的一段说明，会显示在需求台账页</span></label><textarea id="newModDesc" rows="3" placeholder="这个需求要解决什么问题、范围是什么"></textarea></div>
+    <!-- 描述：多行输入，行高/内边距/聚焦环与其余控件同族；
+         右下角自绘 resize 手柄（原生手柄在深色背景下几乎看不见） -->
+    <div class="f-row">
+      <label>描述<span class="phase-tip">给领导 / 业务看的一段说明，会显示在需求台账页</span></label>
+      <div class="ta-field">
+        <textarea id="newModDesc" rows="4" placeholder="这个需求要解决什么问题、范围是什么"></textarea>
+        <span class="ta-resize" aria-hidden="true"></span>
+      </div>
+    </div>
     <div class="f-row"><label>需求文档<span class="phase-tip">外部链接（语雀 / 飞书文档 / Confluence）</span></label><input type="text" id="newModDocUrl" placeholder="https://..."></div>
     <div class="f-row">
       <label>排期状态<span class="phase-tip" id="modSchedTip">待排期：只登记需求，不展示排期条、不计入并行/逾期</span></label>
@@ -361,26 +375,29 @@ ${mobileSheetHTML()}
         <button type="button" class="btn" data-unsched="true">待排期</button>
       </div>
     </div>
+    <!-- 优先级 / 生命周期：下拉选择而不是一排按钮。
+         原来是 5~6 个按钮平铺（生命周期 6 个还得折成两行），占掉小半屏；
+         这两个字段都是"从固定几档里选一个"，下拉才是它该有的控件形态。 -->
     <div class="f-row">
       <label>优先级<span class="phase-tip" id="modPriTip">P0 最高 · P3 最低。仅作标记，不改变排期日期与需求顺序</span></label>
-      <div class="seg" id="segModPri">
-        <button type="button" class="btn" data-pri="">无</button>
-        <button type="button" class="btn" data-pri="P0">P0</button>
-        <button type="button" class="btn" data-pri="P1">P1</button>
-        <button type="button" class="btn" data-pri="P2">P2</button>
-        <button type="button" class="btn" data-pri="P3">P3</button>
-      </div>
+      <select id="selModPri" class="mod-meta-select" title="选择优先级">
+        <option value="">未设置</option>
+        <option value="P0">P0 · 最高</option>
+        <option value="P1">P1 · 高</option>
+        <option value="P2">P2 · 中</option>
+        <option value="P3">P3 · 低</option>
+      </select>
     </div>
     <div class="f-row">
       <label>生命周期<span class="phase-tip" id="modLcTip">人工维护的流程门；与台账「状态」列（自动计算）不是一回事</span></label>
-      <div class="seg" id="segModLc">
-        <button type="button" class="btn" data-lc="">未设置</button>
-        <button type="button" class="btn" data-lc="待分析">待分析</button>
-        <button type="button" class="btn" data-lc="待确认">待确认</button>
-        <button type="button" class="btn" data-lc="已确认">已确认</button>
-        <button type="button" class="btn" data-lc="已提测">已提测</button>
-        <button type="button" class="btn" data-lc="已上线">已上线</button>
-      </div>
+      <select id="selModLc" class="mod-meta-select" title="选择生命周期">
+        <option value="">未设置</option>
+        <option value="待分析">待分析</option>
+        <option value="待确认">待确认</option>
+        <option value="已确认">已确认</option>
+        <option value="已提测">已提测</option>
+        <option value="已上线">已上线</option>
+      </select>
     </div>
     <div class="f-row" id="rowNewModPhases">
       <label>初始化阶段<span class="phase-tip" id="newModPhaseTip">默认全选，可自定义要创建的任务阶段；「需求确认」为里程碑，并自动追加「提测」「上线」里程碑</span></label>

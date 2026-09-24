@@ -13,9 +13,9 @@
 import { fmt } from '../core/dates.js';
 import { isReadonly } from '../utils/readonly.js';
 import { findVersion, versionOfMap, versionMembers, versionStatus } from '../core/versions.js';
-import { toggleVersionExpanded } from '../views/version-view.js';
+import { toggleVersionExpanded, isVersionExpanded, setVersionPage, versionPageOf } from '../views/version-view.js';
 
-const SEL = '[data-ver-new],[data-ver-edit],[data-ver-toggle],[data-ver-add],[data-ver-remove],[data-ver-ship],[data-ver-unship],[data-ver-archive],[data-ver-del]';
+const SEL = '[data-ver-new],[data-ver-edit],[data-ver-toggle],[data-ver-page],[data-ver-add],[data-ver-remove],[data-ver-ship],[data-ver-unship],[data-ver-archive],[data-ver-del]';
 
 export function bindVersionPage(deps) {
   const doc = deps.doc;
@@ -103,6 +103,10 @@ export function bindVersionPage(deps) {
     if (actualRow && !actualRow.hidden && actualEl && actualEl.value) patch.shippedAt = actualEl.value;
     try {
       const r = editingId ? deps.sched.updateVersion(editingId, patch) : deps.sched.createVersion(patch);
+      // 新建 / 改上线日都可能让这个版本落在别的页上：把它的那一页翻出来再重绘，
+      // 否则用户"保存完看不见自己刚建的版本"（版本页每页 6 个，列表一长必踩）
+      const vid = r && r.version && r.version.id;
+      if (vid) setVersionPage(versionPageOf(deps.planStore.state, vid));
       closeModal();
       deps.render();
       const rej = (r && r.rejected) || [];
@@ -126,6 +130,8 @@ export function bindVersionPage(deps) {
     if (d.verEdit != null) { openModal(d.verEdit); return; }
     if (d.verAdd != null) { openModal(d.verAdd); return; }
     if (d.verToggle != null) { toggleVersionExpanded(d.verToggle); deps.render(); return; }
+    // 翻页：纯查看动作，只读下也要能用（导出件里版本多了一样得翻）
+    if (d.verPage != null) { setVersionPage(d.verPage); deps.render(); return; }
 
     if (isReadonly()) return;   // 以下都会改数据
 
@@ -182,8 +188,40 @@ export function bindVersionPage(deps) {
     }
   }
 
+  // 成员行「改版本」下拉：一次完成"从本版本移出 + 加入目标版本"（见 scheduler 的 setModuleVersion）。
+  // 与点需求卡片上的「移出」不同，这里不需要 confirm —— 目标是明确的另一个版本，
+  // 不是"移出去悬空"，且改错了再改回来即可。
+  function onChange(e) {
+    const t = e.target;
+    const el = (t && t.closest) ? t.closest('[data-ver-move]') : null;
+    if (!el) return;
+    const from = el.dataset.verMove;      // 原版本 id：失败 / 位置没变时用它回滚
+    if (isReadonly()) { el.value = from; return; }
+    const name = el.dataset.mod;
+    const to = el.value;
+    if (!to || to === from) return;
+    try {
+      const r = deps.sched.setModuleVersion(name, to);
+      const target = r && r.to;
+      // 把目标版本卡展开、并翻到它所在的那一页：改完那一行会从当前卡里消失，
+      // 不展开 / 不翻页就等于"点完没反应，需求不见了"。先切状态再重绘，避免多画一次。
+      if (target) {
+        if (!isVersionExpanded(target.id)) toggleVersionExpanded(target.id);
+        setVersionPage(versionPageOf(deps.planStore.state, target.id));
+      }
+      deps.render();
+      deps.toast(target ? `已把「${name}」调整到「${target.name}」` : `已把「${name}」移出版本`);
+    } catch (err) {
+      el.value = from;
+      deps.toast(err && err.message ? err.message : '调整版本失败');
+    }
+  }
+
   // 委托绑在 #gantt 上（版本页内容在它内部重绘）；弹窗的按钮在 shell 里，单独绑
-  if (deps.gantt) deps.gantt.addEventListener('click', onClick);
+  if (deps.gantt) {
+    deps.gantt.addEventListener('click', onClick);
+    deps.gantt.addEventListener('change', onChange);
+  }
   const mask = g('verMask');
   if (mask) mask.addEventListener('click', closeModal);
   const btnSave = g('btnSaveVer');

@@ -11,6 +11,8 @@
 // ============================================================
 import { buildTaskMenuItems, buildModuleMenuItems, buildResMenuItems, openContextMenu, dateAtClientX } from './context-menu.js';
 import { openNewTaskDrawer, openTaskDrawer } from './task-drawer.js';
+import { isModCollapsed, toggleModCollapsed } from '../core/mod-fold.js';
+import { scrollToModStart } from './gantt-scroll.js';
 
 // 只读守卫（组件层统一）：true=可编辑，false=只读
 function editable(deps) {
@@ -76,8 +78,10 @@ function dispatchModMenu(key, modName, deps, atDate) {
   } else if (key === 'editMod') {
     if (deps.modals && deps.modals.openEditModModal) deps.modals.openEditModModal(modName);
   } else if (key === 'toggleCollapse') {
-    deps.viewState.collapsed[modName] = !deps.viewState.collapsed[modName];
+    // 与点需求行展开走同一条口径：展开后把任务开始日带到眼前（见 gantt-scroll.js）
+    const collapsedNow = toggleModCollapsed(deps.viewState.collapsed, modName);
     deps.render();
+    if (!collapsedNow) scrollToModStart(deps, modName);
   } else if (key === 'archiveMod') {
     if (!confirm(`确认归档需求「${modName}」？\n归档后需求转为只读，不再显示在排期视图中（可在顶部「归档」页恢复）。`)) return;
     if (!deps.sched.archiveModule) return;
@@ -125,7 +129,7 @@ export function openModContextMenu(e, modName, deps) {
   const at = dateFromEvent(e, deps);
   const items = buildModuleMenuItems(mo, {
     editable: editable(deps),
-    collapsed: !!deps.viewState.collapsed[modName],
+    collapsed: isModCollapsed(deps.viewState.collapsed, modName),
     atDate: at
   });
   openContextMenu({

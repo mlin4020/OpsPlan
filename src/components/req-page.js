@@ -16,6 +16,7 @@
 import { defaultReqFilter, defaultReqSort } from '../core/mod-query.js';
 
 // 行内编辑字段的中文名（提示文案用；未列出的字段只提示「已更新」）
+// version 不在表里：它的提示要说出"调到哪个版本"，文案在 commitInline 里单独出
 const INLINE_LABEL = { lifecycle: '生命周期', proposedBy: '提出人' };
 
 export function bindReqPage(deps) {
@@ -82,6 +83,17 @@ export function bindReqPage(deps) {
     // 没变就不写、不重绘：否则每次点开下拉再关掉都会触发一次无谓的保存
     if (next === prev) return;
     try {
+      // 所属版本是唯一的"不在需求上"的字段：需求侧不存 versionId，归属由版本侧的成员名单
+      // 持有（见 core/versions.js），所以这里不能走 updateModule —— 传给它的 version 字段
+      // 会被当成需求自身属性，静默什么也不做。改归属一次要同时落新旧两个版本的名单。
+      if (field === 'version') {
+        if (!deps.sched.setModuleVersion) throw new Error('当前入口不支持调整版本');
+        const r = deps.sched.setModuleVersion(name, next || null);
+        deps.render();
+        const to = r && r.to;
+        deps.toast(to ? `已调整到「${to.name}」` : '已移出版本');
+        return;
+      }
       deps.sched.updateModule({ oldName: name, [field]: next });
       deps.render();
       deps.toast(INLINE_LABEL[field] ? `已更新${INLINE_LABEL[field]}` : '已更新');
@@ -111,7 +123,7 @@ export function bindReqPage(deps) {
     // 排序方式下拉：值编码成 "key:dir"
     const sortSel = t.closest('[data-req-sortsel]');
     if (sortSel) {
-      const [key, dir] = String(sortSel.value || 'focus:asc').split(':');
+      const [key, dir] = String(sortSel.value || 'group:asc').split(':');
       const s = curS();
       s.key = key;
       s.dir = dir === 'desc' ? 'desc' : 'asc';
@@ -124,9 +136,15 @@ export function bindReqPage(deps) {
     apply({ top: true });
   });
 
+  // 拖拽排序（只在默认的「进行中优先」排序下渲染手柄，见 views/req-view.js 的 dragOn）
+  let dragActive = false;   // 拖动中 / 刚松手的一瞬：拦住随后的 click，别把它当成"展开行"
+  let dragName = null;      // 正在拖的需求名
+  let dragTier = null;      // 它所属的分层档：只有同档的行才给落点
+
   g.addEventListener('click', e => {
     const t = e.target;
     if (!t || !t.closest) return;
+    if (dragActive) return;
 
     // ---- 只读模式下也要能用的：展开 / 收起、排序、重置 ----
     // ⚠ 行内操作按钮（编辑 / 归档 / 删除）与行内编辑控件（生命周期下拉 / 提出人输入框）
@@ -187,7 +205,137 @@ export function bindReqPage(deps) {
     }
   });
 
-  return {};
+  // ---- 台账行拖动排序 ----
+  // 为什么用原生 DnD 而不是鼠标位移模拟：与排期页的需求行排序是同一套交互
+  // （gantt-interactions.js 的 setupRowDnD），两处手感一致，也不必再养一套拖拽实现。
+  //
+  // 拖拽改的是 modules 的数组顺序（sched.moveModule）—— 那就是甘特图顺序本身，
+  // 所以台账里拖出来的次序，切到排期页看是同一次序。
+  //
+  // 两条硬规则：
+  //   1) 只在同一分层档内换位。档位由需求状态自动算（进行中 / 待排期 / 已完成…），
+  //      跨档拖动改变不了它属于哪一档，松手后照样被分组规则拉回原处 ——
+  //      与其让用户白拖一次再看着它弹回去，不如直接拦住并说清楚。
+  //   2) 只改顺序，不改状态、不改日期，也不动任何任务条。
+  // 只清"这一下要落在哪儿"的提示；拖动本身的状态（源行变淡 / 异档变淡）留着
+  const clearDropHints = () => {
+    if (!g.querySelectorAll) return;
+    g.querySelectorAll('.req-row.drop-hint-before,.req-row.drop-hint-after')
+      .forEach(el => el.classList.remove('drop-hint-before', 'drop-hint-after'));
+  };
+  // 拖拽收尾：落点提示 + 源行 / 异档的淡化一起清掉
+  const clearDragHints = () => {
+    if (g.querySelectorAll) {
+      g.querySelectorAll('.req-row.drop-hint-before,.req-row.drop-hint-after,.req-row.dragging,.req-row.req-dim')
+        .forEach(el => el.classList.remove('drop-hint-before', 'drop-hint-after', 'dragging', 'req-dim'));
+    }
+    if (g.classList) g.classList.remove('req-dragging');
+  };
+
+  // 拖动期间把"不可落的档"整体变淡：可拖范围一眼可见，不必靠试错去发现
+  const markDragScope = (srcRow, tier) => {
+    if (g.classList) g.classList.add('req-dragging');
+    if (!g.querySelectorAll) return;
+    g.querySelectorAll('.req-row').forEach(r => {
+      if (r !== srcRow && Number(r.dataset.reqTier) !== tier) r.classList.add('req-dim');
+    });
+  };
+
+  // 落点在目标行的上半 → 插到它前面；下半 → 插到它后面（与排期页同一判定）
+  const dropBefore = (e, row) => {
+    const r = row.getBoundingClientRect();
+    return e.clientY < r.top + r.height / 2;
+  };
+
+  g.addEventListener('dragstart', e => {
+    const t = e.target;
+    const handle = t && t.closest ? t.closest('[data-req-drag]') : null;
+    if (!handle) return;
+    // 只读模式下连拖都不让起：在事件层拦住比只靠 CSS 稳，避免"能拖但存不进去"
+    if (deps.isReadonly && deps.isReadonly()) { e.preventDefault(); return; }
+    const row = handle.closest('[data-req-row]');
+    dragActive = true;
+    dragName = handle.dataset.reqDrag;
+    dragTier = row ? Number(row.dataset.reqTier) : NaN;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', dragName); } catch (err) { /* 老浏览器不认自定义 MIME，忽略 */ }
+    }
+    if (row && row.classList) row.classList.add('dragging');
+    markDragScope(row, dragTier);
+  });
+
+  g.addEventListener('dragover', e => {
+    if (dragName == null) return;
+    const t = e.target;
+    const row = t && t.closest ? t.closest('[data-req-row]') : null;
+    // 离开有效的行（拖到表外 / 拖回自己身上）时把上一次的落点提示擦掉，
+    // 否则光标早已移开，蓝线还留在原地指挥用户
+    if (!row) { clearDropHints(); return; }
+    // 跨档不 preventDefault → 浏览器显示"禁止放置"光标，也不会有 drop 事件
+    if (Number(row.dataset.reqTier) !== dragTier || row.dataset.reqRow === dragName) { clearDropHints(); return; }
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    clearDropHints();
+    row.classList.add(dropBefore(e, row) ? 'drop-hint-before' : 'drop-hint-after');
+  });
+
+  g.addEventListener('drop', e => {
+    const from = dragName;
+    if (from == null) return;
+    const t = e.target;
+    const row = t && t.closest ? t.closest('[data-req-row]') : null;
+    const to = row ? row.dataset.reqRow : null;
+    const before = row ? dropBefore(e, row) : false;
+    dragName = null;
+    if (!row || to === from) { clearDragHints(); return; }
+    // 兜底：dragover 已按档拦住，这里再判一次，免得别的入口（如浏览器扩展）直接投递 drop
+    if (Number(row.dataset.reqTier) !== dragTier) {
+      clearDragHints();
+      deps.toast('只能在同一分组内调整顺序');
+      return;
+    }
+    e.preventDefault();
+    deps.sched.moveModule(from, to, before);
+    deps.render();
+    deps.toast('已调整需求顺序');
+  });
+
+  g.addEventListener('dragend', () => {
+    dragName = null;
+    dragTier = null;
+    clearDragHints();
+    // 拖动结束后浏览器还会补一个 click，延迟清掉标记，免得那一下把行展开/收起
+    setTimeout(() => { dragActive = false; }, 120);
+  });
+
+  // 新建需求后把它滚进视野并闪一下。
+  //
+  // 为什么需要：台账默认按「进行中优先」排序，新建的需求还没有任何任务，
+  // 落在「待启动」档，会被排到列表靠下的位置 —— 建完还得手动翻下去才能接着
+  // 给它加任务。排序逻辑本身没错（它就是"还没启动"），缺的是"建完把你带过去"。
+  //
+  // 标记由 components/modals.js 在创建成功后写入 viewState.focusMod，
+  // 这里在每次重绘后消费一次（不消费会每次重绘都滚，用户就没法往下看了）。
+  const focusPending = () => {
+    const name = vs.focusMod;
+    if (!name) return;
+    vs.focusMod = null;   // 只定位一次
+    const rows = g.querySelectorAll ? g.querySelectorAll('[data-req-row]') : [];
+    // 按 dataset 比对而不是用属性选择器：需求名可能含引号等特殊字符
+    const row = [...rows].find(r => r.dataset && r.dataset.reqRow === name);
+    if (!row) return;     // 被当前筛选挡掉了：如实不做事，不硬找也不报错
+    if (row.scrollIntoView) {
+      try { row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      catch (e) { row.scrollIntoView(); }   // 老浏览器不认 options 对象
+    }
+    if (row.classList) {
+      row.classList.add('is-flash');
+      setTimeout(() => row.classList.remove('is-flash'), 1600);
+    }
+  };
+
+  return { focusPending };
 }
 
 export default { bindReqPage };

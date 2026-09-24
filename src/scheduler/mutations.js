@@ -11,7 +11,7 @@ import { F } from './planning.js';
 import { fmt, addDays } from '../core/dates.js';
 import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority, normalizeLifecycle } from '../core/default-data.js';
 import { milestoneName } from '../core/mod-tag.js';
-import { newVersionId, versionOfMap, isGoMs, findGoMs } from '../core/versions.js';
+import { newVersionId, versionOfMap, versionOfMod, isGoMs, findGoMs } from '../core/versions.js';
 import { userStore } from '../store/user-store.js';
 
 // 只读守卫：编辑类入口统一从这里过（throw 语义用于"新增"类，其余静默 return）
@@ -477,7 +477,7 @@ export function createMutations(ctx) {
   //     于是图上的红色菱形、任务抽屉、总览「里程碑一览」、导出/同步、撤销栈全部自动一致；
   //     若改成"渲染/排期时临时覆盖"，就要同步改 5 个读 m 的地方，迟早显示成两个日期。
   //   · 改版本日 → 批量回写；移出/删版本 → 解锁回「跟着任务链自动算」（不还原旧日期）。
-  //   · 排期引擎保持正向（不做反向排期），"赶不上"只在渲染层预警（见 core/versions.js）。
+  //   · 排期引擎保持正向（不做反向排期）。
   // versions 是 state 的顶层数组：新增/修改时别忘了同步各白名单出口（persistence / plan-sync / history）。
 
   const versions = () => {
@@ -658,6 +658,47 @@ export function createMutations(ctx) {
     return updateVersion(id, { mods: (v.mods || []).filter(n => n !== name) });
   }
 
+  // 直接给某条需求改归属版本（需求台账「所属版本」行内下拉的落点）。
+  //
+  // 为什么需要它：改归属原先只能进版本弹窗里"先取消勾选、再去另一个版本勾选"——
+  // 两步且中间态是"无版本"，容易只做一半。这里一次做完两边的名单变更。
+  //
+  // 语义 = 移出旧版本 + 加入新版本（versionId 传空 = 只移出）：
+  //   · 移出 → 解锁上线日（回落到跟随任务链自动算）；
+  //   · 加入 → 把上线里程碑钉到新版本日（与 applyVersionMods 同一套 pinModToDate）。
+  // 不能复用 updateVersion(id, {mods})：它的 applyVersionMods 会拒绝"已在别的版本"的需求，
+  // 于是必须先移出再移入 —— 那正是这里要替用户省掉的两步。
+  // 返回 { from, to, changed }，供调用方出提示文案。
+  function setModuleVersion(name, versionId) {
+    if (!assertEditable()) return null;
+    const mo = modByName(name);
+    if (!mo) return null;
+    const cur = versionOfMod(getState(), name);
+    const target = versionId ? findVersionRaw(versionId) : null;
+    if (versionId && !target) throw new Error('版本不存在，可能已被删除');
+    // 同类操作重放（下拉选到当前值）不写数据：省掉一次无意义的历史快照
+    if ((target && cur && cur.id === target.id) || (!target && !cur)) {
+      return { from: cur, to: target, changed: false };
+    }
+    // 口径与 applyVersionMods 一致：归档 = 已收口，与"待上线"语义冲突
+    if (target && mo.archived) throw new Error('已归档需求不能加入版本，请先取消归档');
+
+    const touched = [];
+    if (cur) cur.mods = (cur.mods || []).filter(n => n !== name);
+    if (target) {
+      // 待排期需求日期本来就不可信 → 先只登记成员，等改为「已排期」再由 updateModule 补钉
+      // （待排期需求从未被钉过，故这里不需要先解锁）
+      if (!mo.unscheduled) touched.push(pinModToDate(mo, target.date));
+      target.mods = [...(target.mods || []), name];
+    } else if (cur) {
+      const msId = unpinMod(mo);
+      if (msId) touched.push(msId);
+    }
+    cascadeFrom(touched.filter(Boolean));
+    ctx.save();
+    return { from: cur, to: target, changed: true };
+  }
+
   // 一键归档本版本的全部需求：刻意**不**在"标记上线"时自动执行 ——
   // 上线后用户往往还要看几天进度，自动收口会让人找不到需求。返回实际归档的数量。
   function archiveVersionMods(id) {
@@ -755,7 +796,7 @@ export function createMutations(ctx) {
     saveTask, moveMilestone, setMilestoneDate, changeTaskType,
     renameTask, deleteTask, addTask, addModule, updateModule, archiveModule, deleteModule, moveModule, moveBar, resizeTask,
     // 版本（迭代）
-    createVersion, updateVersion, shipVersion, deleteVersion, removeModFromVersion, archiveVersionMods,
+    createVersion, updateVersion, shipVersion, deleteVersion, removeModFromVersion, setModuleVersion, archiveVersionMods,
     updateResource, addResource, deleteResource
   };
 }

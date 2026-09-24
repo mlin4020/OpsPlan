@@ -22,6 +22,11 @@ function makeCtx() {
   };
   // 工作日简算：周一~周五，忽略假期（测试用）
   const isWd = d => { const w = d.getDay(); return w !== 0 && w !== 6; };
+  // 需求泳道默认全折叠（见 core/mod-fold.js，键缺失即折叠）。
+  // 本文件锁的是**展开态**的模板输出（任务条 / 里程碑标签等），故显式全部展开，
+  // 免得断言跟着产品默认值一起变。折叠默认值本身有 tests/mod-fold.test.js 盯着。
+  const collapsed = {};
+  state.modules.forEach(m => { collapsed[m.name] = false; });
   return {
     state,
     sched: {
@@ -34,7 +39,7 @@ function makeCtx() {
     today: F('2026-08-20'),
     dayW: 34,
     zoom: 0,
-    collapsed: {},
+    collapsed,
     fmtD: d => (d.getMonth() + 1) + '/' + d.getDate(),
     modRange: mo => {
       let s = null, e = null;
@@ -306,6 +311,71 @@ describe('views: 应达基线（与进度填充同坐标）', () => {
   });
 });
 
+describe('views: 总览（report）按需求默认排序（进行中优先）', () => {
+  // 三条需求、各自只放一个任务，状态决定档位：
+  //   已逾期（结束日已过、有人负责、未完成）→ tier 0，最前
+  //   进行中（今日落在任务窗口内）        → tier 3
+  //   已完成（done=100）                → tier 6，沉底
+  // 数组顺序刻意排成"已完成在前"，证明是排序在起作用而不是碰巧。
+  //
+  // ⚠️ 逾期判定要求任务**有人负责**（isOverdueTask 排除未分配资源的任务），故都带上 res。
+  //    名称前缀（甲/乙/丙）是故意的：这三条的名字会作为**普通文字**出现在页面上，
+  //    若用「已逾期」这种既是名字又是状态文案的字符串去 indexOf，会撞上顶部指标里的
+  //    「逾期任务」等字样，量出来的顺序就是假的。
+  function threeMods() {
+    const bar = (id, s, e, done) => ({ id, p: 'dev', s, e, w: 5, done, res: ['张三'] });
+    return [
+      { name: '甲需求已完成', bars: [bar('a', '2026-08-01', '2026-08-05', 100)] },
+      { name: '乙需求进行中', bars: [bar('b', '2026-08-18', '2026-08-25', 40)] },
+      { name: '丙需求已逾期', bars: [bar('c', '2026-08-01', '2026-08-07', 0)] }
+    ];
+  }
+
+  // 「排期总览」的行顺序：直接解析 rtl2 行的行头（`<span class="rtl2-name">需求名</span>`）。
+  // 不能靠 indexOf(需求名) 量位置 —— 需求名在整页里出现多次（桌面行、移动卡片、
+  // 卡片内 title），量到的是"文案里第一次提到它"，排出来会是个恒真的假顺序。
+  const rowsOf = html => [...html.matchAll(/<span class="rtl2-name">([^<]+)<\/span>/g)].map(m => m[1]);
+
+  const NAMES = ['丙需求已逾期', '乙需求进行中', '甲需求已完成'];
+
+  const EXPECTED = ['乙需求进行中', '丙需求已逾期', '甲需求已完成'];
+
+  it('排期总览按「进行中优先」排，不再用数据数组顺序', () => {
+    const ctx = makeCtx();
+    ctx.state.modules = threeMods();
+    expect(rowsOf(renderReportView(null, ctx))).toEqual(EXPECTED);
+  });
+
+  it('与台账默认列表同源：同一批数据在两页排出同一次序', () => {
+    const ctx = makeCtx();
+    ctx.state.modules = threeMods();
+    const reportOrder = rowsOf(renderReportView(null, ctx));
+
+    // 台账默认排序（group/asc）走的是同一份 sortModsDefault；行用 data-req-row 标出
+    const reqCtx = makeReqCtx();
+    reqCtx.state.modules = threeMods();
+    reqCtx.reqSort = { key: 'group', dir: 'asc' };
+    const req = renderReqView(null, reqCtx);
+    const reqOrder = NAMES
+      .map(n => ({ n, i: req.indexOf(`data-req-row="${n}"`) }))
+      .sort((a, b) => a.i - b.i)
+      .map(x => x.n);
+
+    expect(reqOrder).toEqual(EXPECTED);
+    expect(reportOrder).toEqual(reqOrder);
+  });
+
+  it('待排期需求整档排在推进中之后，但不落到已完成之后', () => {
+    const ctx = makeCtx();
+    const mods = threeMods();
+    mods.push({ name: '丁需求待排期', unscheduled: true, bars: [{ id: 'd', p: 'dev', s: '2026-08-01', e: '2026-08-05', w: 5, done: 0, res: [] }] });
+    ctx.state.modules = mods;
+    const order = rowsOf(renderReportView(null, ctx));
+    expect(order.indexOf('丁需求待排期')).toBeGreaterThan(order.indexOf('乙需求进行中'));
+    expect(order.indexOf('丁需求待排期')).toBeLessThan(order.indexOf('甲需求已完成'));
+  });
+});
+
 describe('views: 总览（report）不再挂归档区', () => {
   // 归档需求原先在总览/甘特图底部各有一个折叠区，查看要滚到页面最底；
   // 现改为独立「归档」页面（见下方 describe），两处底部折叠区都已移除。
@@ -491,10 +561,12 @@ describe('views: 需求台账主行表格', () => {
     const html = renderReqView(null, makeReqCtx());
     expect(html).toContain('req-wrap');
     expect(html).toContain('class="req-table"');
-    ['需求', '提出', '状态', '生命周期', '文档', '所属版本', '排期与进度', '关键时间', '上线情况', '操作']
+    ['需求', '提出人', '状态', '生命周期', '文档', '所属版本', '排期与进度', '关键时间', '操作']
       .forEach(h => expect(html).toContain(h));
     // 描述已不再单列（收进展开档案），主行只留文档入口，避免空列白占宽度
     expect(html).not.toContain('<th class="req-col-opt">描述</th>');
+    // 上线情况同理：读的是版本口径，铺在表里与「状态」列互相干扰，收进展开档案
+    expect(html).not.toContain('上线情况</th>');
   });
 
   it('标题区给出全量与筛选后计数', () => {
@@ -512,6 +584,51 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('data-req-row="移动端适配"');
     expect(html).toContain('req-badge-arch');
     expect(html).toContain('待排期');
+  });
+
+  it('待排期需求不显示排期与进度、关键时间（日期没定，进度与卡点都不可信）', () => {
+    // 故意给这条需求塞上真实任务与两个卡点里程碑：证明是"按待排期状态抑制"，
+    // 而不是"恰好没数据所以没渲染"
+    const bars = [
+      { id: 'a', p: 'dev', s: '2026-08-01', e: '2026-08-07', w: 5, done: 40, res: [] },
+      { id: 'c', p: 'cfm', m: '2026-08-05', label: '需求确认' },
+      { id: 't', p: 'sit', m: '2026-08-20', label: '提测' }
+    ];
+    const htmlOf = unscheduled => {
+      const ctx = makeReqCtx();
+      ctx.state.modules = [{ name: '样本需求', unscheduled, bars }];
+      return renderReqView(null, ctx);
+    };
+
+    const waiting = htmlOf(true);
+    // 排期列只剩「待排期」三个字，卡点列留空占位
+    expect(waiting).toContain('<td class="req-c-plan"><span class="req-muted">待排期</span></td>');
+    expect(waiting).toContain('<td class="req-c-gate"><span class="req-muted">—</span></td>');
+    expect(waiting).not.toContain('req-pbar');    // 没有进度条
+    expect(waiting).not.toContain('req-devi');    // 没有偏差
+    expect(waiting).not.toContain('req-gate');    // 没有卡点 chip
+    expect(waiting).not.toContain('8/5');         // 卡点日期一个都不露
+
+    // 同一份数据、只切掉待排期标记：两列照常给出（证明上面的"空"是抑制出来的）
+    const scheduled = htmlOf(false);
+    expect(scheduled).toContain('req-pbar');
+    expect(scheduled).toContain('req-gate');
+    expect(scheduled).not.toContain('req-muted">待排期');
+  });
+
+  it('「进行中优先」排序下渲染拖拽手柄与分组档位，其它排序下都不渲染', () => {
+    const ctx = makeReqCtx();
+    ctx.reqSort = { key: 'group', dir: 'asc' };
+    const on = renderReqView(null, ctx);
+    expect(on).toContain('默认排序');   // 排序下拉里能选到（默认项就叫这四个字）
+    expect(on).toContain('data-req-drag="官网改版"');
+    expect(on).toMatch(/data-req-tier="\d"/);
+
+    // 其它排序的档内先后由排序键决定，拖了也会被重排回去 → 不给手柄
+    ctx.reqSort = { key: 'pri', dir: 'asc' };
+    const off = renderReqView(null, ctx);
+    expect(off).not.toContain('data-req-drag');
+    expect(off).not.toContain('data-req-tier');
   });
 
   it('未填写文档时显示占位符，不留空白', () => {
@@ -571,10 +688,16 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toMatch(/class="btn primary req-act" data-req-new/);
   });
 
-  it('上线情况列区分「未加入版本」与版本状态', () => {
-    const html = renderReqView(null, makeReqCtx());
-    expect(html).toContain('未加入版本');   // 数据看板 / 移动端适配均无版本
-    expect(html).toContain('V2.3');        // 官网改版有版本
+  it('上线情况不再单列，但仍能从展开档案里看到', () => {
+    const ctx = makeReqCtx();
+    expect(renderReqView(null, ctx)).not.toContain('req-c-ship');
+
+    toggleReqExpanded('官网改版');
+    const expanded = renderReqView(null, ctx);
+    toggleReqExpanded('官网改版');   // 复位，别把展开态留给后面的用例
+    expect(expanded).toContain('<i>所属版本</i>');
+    expect(expanded).toContain('<i>计划上线</i>');
+    expect(expanded).toContain('<i>实际上线</i>');
   });
 
   it('进度列显示偏差，延后时进度条变色（与总览卡片同口径）', () => {
@@ -631,10 +754,11 @@ describe('views: 需求台账主行表格', () => {
   });
 });
 
-describe('views: 需求台账「上线情况」列措辞', () => {
-  // 这一列取 versionStatus 的版本口径，其中「进行中」（版本有成员已开工）
-  // 和「已逾期」（版本过了上线日没发）会与左边「状态」列的 moduleTag 撞词。
-  // 同一行两个「进行中」/两个「已逾期」且含义不同，读者分不清说的是需求还是版本。
+describe('views: 需求台账「上线情况」措辞', () => {
+  // 这段（展开档案里的「上线情况」）取 versionStatus 的版本口径，其中「进行中」
+  // （版本有成员已开工）和「已逾期」（版本过了上线日没发）会与「状态」列的 moduleTag 撞词。
+  // 同一处两个「进行中」/两个「已逾期」且含义不同，读者分不清说的是需求还是版本 ——
+  // 这也是它从主行那一列收进档案的原因之一。
   it('用上线口径措辞，不复述需求状态', () => {
     // 显式造一个"计划已到期但未完成"的需求，不依赖默认数据的完成度
     const withVer = (date, shipped) => {
@@ -753,27 +877,6 @@ describe('views: 需求台账展开档案', () => {
     expect((html.match(/class="req-detail-tr"/g) || []).length).toBe(1);
   });
 
-  it('未上线版本的「赶不上」把最晚完成日渲染成合法日期（不能是 NaN）', () => {
-    const ctx = makeReqCtx();
-    // 版本日远早于成员任务的最晚结束日 → 必然判定"赶不上"，从而走到那段文案
-    ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-08-01', shipped: false, shippedAt: null, mods: ['官网改版'] }];
-    toggleReqExpanded('官网改版');
-    const html = renderReqView(null, ctx);
-    toggleReqExpanded('官网改版');
-    expect(html).toContain('赶不上');
-    // ship.late.end 是 Date 而非 "YYYY-MM-DD"：误包一层 F() 会渲染成 "NaN/NaN"
-    expect(html).not.toContain('NaN');
-  });
-
-  it('已上线的版本不显示「赶不上」预警（都发布完了，再报风险只会误导读者）', () => {
-    const ctx = makeReqCtx();
-    ctx.state.versions = [{ id: 'v1', name: 'V2.3', date: '2026-08-01', shipped: true, shippedAt: '2026-08-05', mods: ['官网改版'] }];
-    toggleReqExpanded('官网改版');
-    const html = renderReqView(null, ctx);
-    toggleReqExpanded('官网改版');
-    expect(html).toContain('已上线');
-    expect(html).not.toContain('赶不上');
-  });
 });
 
 describe('views: 生命周期徽标', () => {
@@ -848,17 +951,18 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect(html).toContain('req-muted">—');
   });
 
-  it('列头数与主行单元格数一致（10 列，防止加列时只改一半）', () => {
+  it('列头数与主行单元格数一致（9 列，防止加列时只改一半）', () => {
     // 12 → 11：删掉「描述」列（描述收进展开档案，主行只留文档入口）
     // 11 → 10：「排期」与「进度」合并成一列（区间在上、完成度在下）
+    // 10 →  9：删掉「上线情况」列（版本口径，同样收进展开档案）
     const ctx = makeReqCtx();
     ctx.state.modules = [{ name: '单条', bars: [] }];
     const html = renderReqView(null, ctx);
     const thead = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
     const tbody = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
     // 用 /<th[\s>]/ 而不是 /<th/：后者会把 <thead> 也算成一个列头
-    expect((thead.match(/<th[\s>]/g) || []).length).toBe(10);
-    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(10);
+    expect((thead.match(/<th[\s>]/g) || []).length).toBe(9);
+    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(9);
   });
 
   it('筛选条有生命周期下拉，含五档选项与「未设置」', () => {

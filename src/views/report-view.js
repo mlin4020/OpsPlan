@@ -7,6 +7,7 @@ import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME } from '../core/default-data.js';
 import { computeModulePer, milestoneName, archivedModSet, unscheduledModSet, moduleTag, progressDeviation } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
+import { sortModsDefault } from '../core/mod-query.js';
 import { priorityBadge } from './badge.js';
 // 需求进度卡片与 modStats/msName 已抽到 mod-card.js，与「归档需求」页共用同一份实现
 import { renderModCard, modStats, msName } from './mod-card.js';
@@ -22,10 +23,16 @@ const RISK_TYPE_NAME = { overlap: '资源重叠', depend: '依赖违反', overdu
 export function renderReportView(container, ctx) {
   const { state, sched, workday, today, holidays, modRange } = ctx;
   const all = sched.tasks() || [];
-  // 已归档需求：数据保留，仅从「排期总览 / 需求进度」列表中过滤（不再展示）
-  // 注意：核心指标（整体进度/总人日）仍统计全部任务，避免归档已完成需求后整体进度不降反退
-  const mods = (state.modules || []).filter(m => !m.archived);
-  const archived = (state.modules || []).filter(m => !!m.archived);
+  // 已归档需求：数据保留，仅从「排期总览 / 需求进度」列表中过滤（不再展示）。
+  // 注意：核心指标（整体进度/总人日）仍统计全部任务，避免归档已完成需求后整体进度不降反退。
+  //
+  // 未归档需求按**台账默认排序**（进行中优先）排：
+  // 这一页是给领导看"现在有什么在推进"的，把已完成的、还没启动的排在前面等于让人自己往下找。
+  // 口径与需求台账的默认列表同源（core/mod-query.js 的 sortModsDefault），
+  // 两处排出同一次序；档内保持甘特图顺序，故「排期总览」与「需求进度」的先后也对得上。
+  const mods = sortModsDefault((state.modules || []).filter(m => !m.archived), {
+    today, ctx, modRange
+  });
   // 统计口径：
   //   待排期需求 —— 还没排期、日期不可信：既不进核心指标（工作量/进度），也不进并行/逾期
   //   归档需求   —— 已收口：不进并行/逾期，但核心指标保留（否则归档已完成需求会让整体进度倒扣）

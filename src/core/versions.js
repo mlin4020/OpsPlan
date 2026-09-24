@@ -5,7 +5,7 @@
 //   · 迭代 = 版本，同一件事：给一组需求一个「权威上线日」，让它们一起上线
 //   · 加入版本 → 该需求图上那个「上线」里程碑被钉到版本上线日（写数据，见 scheduler/mutations.js），
 //     从而图上的菱形、任务抽屉、总览「里程碑一览」、导出/分享、撤销栈全部自动一致
-//   · 排期引擎保持正向（依赖 + 资源的最早工作日），本模块只做「赶不上」预警 —— 不做反向排期
+//   · 排期引擎保持正向（依赖 + 资源的最早工作日），本模块不做反向排期
 //
 // 数据形状（存在 planStore.state.versions）：
 //   { id, name, date:'YYYY-MM-DD', shipped:boolean, shippedAt:'YYYY-MM-DD'|null, mods:[需求名] }
@@ -13,7 +13,7 @@
 // 需求侧**不存**字段：版本是主、需求名是成员，一律靠 mods 反查（versionOfMap）。
 // 两处存两份必然在「需求改名」时对不上，这是本项目反复踩过的坑。
 // ============================================================
-import { F, diff } from './dates.js';
+import { F, fmtD } from './dates.js';
 
 // 版本状态色：与需求状态标签同一套语义（完成绿 / 逾期红 / 进行中琥珀 / 待启动灰）——
 // 同一件事在两处不能是两个颜色。
@@ -60,16 +60,9 @@ export function versionOfMod(state, modName) {
   return versionOfMap(state && state.versions)[modName] || null;
 }
 
-// 需要排期的任务（非里程碑且有起止）：完成度、最晚完成日都只算这一类
+// 需要排期的任务（非里程碑且有起止）：完成度、排期区间都只算这一类
 export function workTasks(mo) {
   return ((mo && mo.bars) || []).filter(b => !b.m && b.s && b.e);
-}
-
-// 需求最晚完成日（只看普通任务；null = 没有可判断的任务）
-export function modLatestEnd(mo) {
-  const ts = workTasks(mo).map(b => F(b.e));
-  if (!ts.length) return null;
-  return ts.reduce((a, b) => (b > a ? b : a));
 }
 
 // 版本排期区间：成员任务的最早开始 ~ 最晚结束（版本卡上展示用，不落库）
@@ -116,25 +109,6 @@ export function findGoMs(mo) {
   return ms;
 }
 
-// 「赶不上」判定：需求排得最晚的普通任务晚于版本上线日 → 返回 {days, end}，否则 null。
-//   1) 待排期（unscheduled）需求不参与：它的日期本来就不可信，不该拿来报警
-//   2) 没有普通任务（空需求）不参与判定
-//   3) 只看普通任务，不含里程碑 —— 里程碑（上线/提测）是被钉的对象，拿它判会自我循环
-export function modLate(v, mo) {
-  if (!v || !v.date || !mo || mo.unscheduled) return null;
-  const end = modLatestEnd(mo);
-  if (!end) return null;
-  const over = diff(F(v.date), end);   // > 0 表示比上线日晚
-  return over > 0 ? { days: over, end } : null;
-}
-
-// 版本内所有"赶不上"的成员：[{ mo, late }]，用于版本卡与总览风险项
-export function versionLateMods(v, state) {
-  return versionMembers(v, state)
-    .map(mo => ({ mo, late: modLate(v, mo) }))
-    .filter(x => !!x.late);
-}
-
 // 版本状态口径：
 //   已上线   —— 人工标记（实际发版常提前/延后，靠日期自动认定会撒谎）
 //   待上线   —— 成员全部完成但还没标记上线
@@ -158,11 +132,30 @@ export function versionStatus(v, state, today) {
   return { key: 'todo', text: '未开始', color: VERSION_COLORS.todo };
 }
 
-// 版本排序：上线日升序（最近的版本排最前）；同日的按创建顺序稳定排列
+// 版本下拉选项的文案：`V2.3（10/29）`。
+//
+// 为什么收在 core：选版本这件事有两个入口 —— 需求台账的「所属版本」下拉、
+// 版本页成员行的「改版本」下拉。两处文案必须同源：同一个版本在两个页面
+// 显示成两种样子，用户会怀疑自己选错了东西。
+export function versionOptionLabel(v) {
+  if (!v) return '';
+  return `${v.name || ''}${v.date ? `（${fmtD(F(v.date))}）` : ''}`;
+}
+
+// 版本排序：**上线日倒序**（最新的排最前）；同日的按创建顺序稳定排列。
+//
+// 为什么倒序：版本页是"接下来要上什么"的看板，正序会把早就发完的旧版本顶在最上面，
+// 每次打开都得往下翻到最新的一版 —— 那是反的。列表、台账的「所属版本」下拉、
+// 成员行的「改版本」下拉共用这一份顺序，三处不能各排各的（同一页两个顺序最费解）。
+//
+// 没有上线日的版本排最后（老数据可能缺日期）：它不是"最新"，不该因为缺值插到队首。
 export function sortVersions(versions) {
   return [...(versions || [])].sort((a, b) => {
-    const da = a && a.date ? F(a.date).getTime() : Infinity;
-    const db = b && b.date ? F(b.date).getTime() : Infinity;
-    return da - db;
+    const da = a && a.date ? F(a.date).getTime() : null;
+    const db = b && b.date ? F(b.date).getTime() : null;
+    if (da === null && db === null) return 0;
+    if (da === null) return 1;
+    if (db === null) return -1;
+    return db - da;
   });
 }

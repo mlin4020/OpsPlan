@@ -150,6 +150,7 @@ export function createScheduler({ planStore, userStore, W, sync }) {
     shipVersion: mutations.shipVersion,
     deleteVersion: mutations.deleteVersion,
     removeModFromVersion: mutations.removeModFromVersion,
+    setModuleVersion: mutations.setModuleVersion,
     archiveVersionMods: mutations.archiveVersionMods,
     detectProblems: detect,
     save: (skipHistory) => persistence.save(skipHistory),

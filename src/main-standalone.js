@@ -18,6 +18,7 @@ import { createWorkday } from './core/workday.js';
 import { defaultHolidays } from './core/default-data.js';
 import { defaultWorkFilter } from './core/work-filter.js';
 import { defaultReqFilter, defaultReqSort, loadReqView, saveReqView } from './core/mod-query.js';
+import { expandAllMods } from './core/mod-fold.js';
 import { createScheduler } from './scheduler/index.js';
 import { buildViewerShellHTML } from './components/shell.js';
 import { bindWorkFilter } from './components/work-filter.js';
@@ -108,6 +109,10 @@ function boot() {
     reqFilter: savedReqView.filter,
     reqSort: savedReqView.sort
   };
+  // 折叠表：缺省 = 折叠（见 core/mod-fold.js）。但查看器没有组件层 ——
+  // 需求行上没绑折叠事件，点了不会展开，所以这里必须显式全部展开，
+  // 否则导出件里只剩折叠的概要行，任务条一条都看不见，且没有任何办法展开。
+  expandAllMods(viewState.collapsed, planStore.state.modules);
   const baseCtx = {
     state: planStore.state,
     sched,

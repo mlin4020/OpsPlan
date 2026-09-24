@@ -11,6 +11,7 @@ import { PCOL, PNAME } from '../core/default-data.js';
 import { moduleTag, computeModulePer, milestoneName } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
 import { versionOfMod } from '../core/versions.js';
+import { isModCollapsed } from '../core/mod-fold.js';
 import { priorityBadge, versionBadge } from './badge.js';
 
 // 计划模式图标：手动=锁定，自动=循环重算
@@ -178,7 +179,9 @@ export function renderModView(container, ctx, conflictSet) {
     </div>`;
   }
   modules.forEach(mo => {
-    const isCol = collapsed[mo.name];
+    // 默认全折叠（键缺失即折叠，见 core/mod-fold.js）：打开就看清有哪几条需求，
+    // 展开某条才铺开它的任务条
+    const isCol = isModCollapsed(collapsed, mo.name);
     const rng = modRange(mo);
     const rngTxt = rng ? `${fmtD(rng.start)} - ${fmtD(rng.end)}` : '暂无任务';
     const { tag: autoTag, tagc: autoTagc } = moduleTag(mo, today);

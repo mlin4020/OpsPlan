@@ -17,6 +17,8 @@
 // ============================================================
 import { $ } from '../utils/dom.js';
 import { buildExportPayload, buildExportHTML, downloadFile } from '../utils/export.js';
+import { expandAllMods, collapseAllMods } from '../core/mod-fold.js';
+import { scrollDateToCenter } from './gantt-scroll.js';
 
 const ZOOM_DAYW = { day: 13, week: 15, month: 32 };
 const MIN_DAYW = 2, MAX_DAYW = 40;
@@ -62,20 +64,11 @@ function applyZoom(dw, sc, deps) {
   deps.render(sc);
 }
 
-// 移动端「今天」：把时间轴滚到今日居中（左侧固定名称列宽从 CSS 变量读取）
+// 移动端「今天」：把时间轴滚到今日居中（左侧固定名称列宽由 gantt-scroll 读取 CSS 变量处理）
 function scrollToToday(deps) {
   if (!zoomEnabled(deps)) return;
-  const gsc = deps.gsc;
   const ctx = deps.getCtx ? deps.getCtx() : null;
-  if (!gsc || !ctx || typeof ctx.X !== 'function') return;
-  const x = ctx.X(ctx.today);
-  let mnameW = 0;
-  try {
-    const v = deps.doc.defaultView.getComputedStyle(deps.doc.documentElement).getPropertyValue('--mname-w');
-    mnameW = parseInt(v, 10) || 0;
-  } catch (e) { mnameW = 0; }
-  const visible = Math.max(80, gsc.clientWidth - mnameW);
-  gsc.scrollLeft = Math.max(0, Math.round(x - visible / 2));
+  scrollDateToCenter(deps, ctx && ctx.today);
 }
 
 // ---- 移动端「更多」操作弹层 ----
@@ -218,10 +211,14 @@ function bindToolbarControls(deps) {
     else if (mq.addListener) mq.addListener(onChange);
   }
 
-  // 折叠
-  on('expAll', () => { deps.viewState.collapsed = {}; deps.render(); });
+  // 折叠。两个按钮都走 core/mod-fold.js 的口径：缺省 = 折叠，
+  // 所以「全部展开」必须逐条写显式 false，不能靠清空表（清空等于全折叠）
+  on('expAll', () => {
+    expandAllMods(deps.viewState.collapsed, deps.planStore.state.modules);
+    deps.render();
+  });
   on('colAll', () => {
-    deps.planStore.state.modules.forEach(m => { if (!m.archived) deps.viewState.collapsed[m.name] = true; });
+    collapseAllMods(deps.viewState.collapsed);
     deps.render();
   });
 

@@ -140,38 +140,37 @@ function renderModSchedSeg(unscheduled, deps) {
   box.querySelectorAll('.btn').forEach(b => b.classList.toggle('on', (b.dataset.unsched === 'true') === !!unscheduled));
 }
 
-// 优先级分段控件：无 / P0~P3。
-// 「无」是合法状态 —— 历史数据没有 pri 字段，编辑时必须能原样保留「未设置」，
+// 优先级下拉：未设置 / P0~P3。
+// 「未设置」是合法值 —— 历史数据没有 pri 字段，编辑时必须能原样保留，
 // 否则一打开编辑再保存就替用户臆造了一个优先级。
+//
+// 原先是一排分段按钮（无/P0/P1/P2/P3）：小抽屉里 5 个按钮平铺要占一整行，
+// 而"从固定几档里选一个"本来就是下拉的语义；生命周期那 6 个更是得折成两行。
 function renderModPriSeg(pri, deps) {
-  const box = deps.getEl('segModPri');
-  if (!box) return;
-  const cur = normalizePriority(pri) || '';
-  box.querySelectorAll('.btn').forEach(b => b.classList.toggle('on', (b.dataset.pri || '') === cur));
+  const sel = deps.getEl('selModPri');
+  if (!sel) return;
+  sel.value = normalizePriority(pri) || '';
 }
 
 // 读取当前选中的优先级（'' = 未设置）
 function readModPri(deps) {
-  const box = deps.getEl('segModPri');
-  const on = box ? box.querySelector('.btn.on') : null;
-  return (on && on.dataset.pri) || '';
+  const sel = deps.getEl('selModPri');
+  return sel ? (sel.value || '') : '';
 }
 
-// 生命周期分段控件：未设置 / 待确认 / 已确认 / 已提测 / 已上线。
+// 生命周期下拉：未设置 / 待分析 / 待确认 / 已确认 / 已提测 / 已上线。
 // 「未设置」是合法档 —— 老数据没有 lifecycle 字段，编辑时必须能原样保留，
 // 否则一打开编辑再保存就替用户臆造了一个「待确认」。
 function renderModLcSeg(lc, deps) {
-  const box = deps.getEl('segModLc');
-  if (!box) return;
-  const cur = normalizeLifecycle(lc) || '';
-  box.querySelectorAll('.btn').forEach(b => b.classList.toggle('on', (b.dataset.lc || '') === cur));
+  const sel = deps.getEl('selModLc');
+  if (!sel) return;
+  sel.value = normalizeLifecycle(lc) || '';
 }
 
 // 读取当前选中的生命周期（'' = 未设置）
 function readModLc(deps) {
-  const box = deps.getEl('segModLc');
-  const on = box ? box.querySelector('.btn.on') : null;
-  return (on && on.dataset.lc) || '';
+  const sel = deps.getEl('selModLc');
+  return sel ? (sel.value || '') : '';
 }
 
 // 提出人候选：容器写在抽屉的静态 DOM 里，但候选随数据变化，
@@ -219,17 +218,29 @@ function bindModalControls(deps) {
     segSched.querySelectorAll('.btn').forEach(x => x.classList.toggle('on', x === b));
   }));
 
-  // 优先级：多选一分段控件（含「无」）
-  const segPri = g('segModPri');
-  if (segPri) segPri.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => {
-    segPri.querySelectorAll('.btn').forEach(x => x.classList.toggle('on', x === b));
-  }));
+  // 优先级 / 生命周期：下拉在原生的 change 里就把值定好了，这里不需要再挂监听
+  // （原先的分段按钮需要手动维护 .on，改成 select 后这份状态由浏览器持有）
 
-  // 生命周期：多选一分段控件（含「未设置」）
-  const segLc = g('segModLc');
-  if (segLc) segLc.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => {
-    segLc.querySelectorAll('.btn').forEach(x => x.classList.toggle('on', x === b));
-  }));
+  // 提出时间：点框内任意位置（日期文字 / 右侧那枚日历图标）都唤起日期选择器。
+  //
+  // 原生 date 只有右侧内建的那枚小图标能点开，中间显示日期的文字区点了毫无反应 ——
+  // 用户的第一反应就是"这里怎么点不动"。
+  //
+  // 三个要点，缺一个就退化成"点了没反应"（真踩过）：
+  //   ① 监听绑在**输入框自己**身上 —— 它铺满整块，是唯一的热区；
+  //   ② 不要写"目标不是输入框才处理"这类守卫：输入框铺满容器，那个条件等于把所有点击都挡掉；
+  //   ③ 自绘的日历图标 .df-ic 必须 pointer-events:none，让点击落到下面的输入框上。
+  const dateField = g('newModProposedAt');
+  if (dateField) {
+    dateField.addEventListener('click', () => {
+      if (typeof dateField.showPicker === 'function') {
+        // 点在原生图标上时浏览器已经弹过了，再调一次是无害的空操作（规范里"已在显示则返回"）
+        try { dateField.showPicker(); return; } catch (err) { /* 非用户手势 / 已被拦截，忽略 */ }
+      }
+      // 老浏览器没有 showPicker：聚焦即可，聚焦后能直接键盘输入日期
+      dateField.focus();
+    });
+  }
 
   // 需求颜色：实时提示撞色（input 事件在取色器拖动过程中连续触发，所见即所改）
   const tagcInp = g('newModTagc');
@@ -257,6 +268,8 @@ function bindModalControls(deps) {
       try {
         // tagc 落「实际生效色」：与去重逻辑、后续弹窗回显保持同一口径
         deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
+        // 折叠态跟着改名走。口径见 core/mod-fold.js：只有显式 false 表示展开，
+        // 原样搬运 undefined（折叠）与 true（折叠）都仍然折叠，不会因改名意外弹开
         const collapsed = deps.viewState.collapsed;
         collapsed[name] = collapsed[modEditName];
         if (name !== modEditName) delete collapsed[modEditName];
@@ -271,7 +284,13 @@ function bindModalControls(deps) {
       if (phases === null) { deps.toast('请至少选择一个要初始化的阶段'); return; }
       deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
       closeNewModModal(deps);
+      // 刚建的需求显式展开（缺省是折叠）：用户下一步就是给它加任务，
+      // 折着的话还得再点一下才能看到自己刚建出来的阶段
       deps.viewState.collapsed[name] = false;
+      // 请台账在重绘后把这一行滚进视野：默认按「进行中优先」排序时，
+      // 刚建的需求（还没任务）落在「待启动」档，会被排到列表靠下，
+      // 不定位的话用户建完得自己翻下去才能接着加任务。
+      deps.viewState.focusMod = name;
       deps.render();
       deps.toast('已新增需求');
     }

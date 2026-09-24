@@ -23,10 +23,13 @@ const norm = s => String(s == null ? '' : s).toLowerCase();
 export function defaultReqFilter() {
   return { kw: '', status: 'all', pri: 'all', ver: 'all', scope: 'all', unscheduled: 'all', lifecycle: 'all' };
 }
-// 默认按「关注度」而不是甘特图顺序：这页是给领导与业务看的，
-// 一进来先看到"最该被处理的那几条"比"按排期先后"有用得多。
+// 默认按「进行中优先」而不是甘特图顺序或「关注度」：
+// 这页是给领导与业务看的 —— 一进来先看到"正在推进的那几条"，
+// 比"按排期先后"或"最紧急的排最前"都更贴近它的用途。
+// 选它还有个工程上的理由：它档内只认甘特图顺序（见 sortValue 的 group 分支），
+// 台账里拖出来的次序不会被优先级 / 日期这类二级键打乱。
 export function defaultReqSort() {
-  return { key: 'focus', dir: 'asc' };
+  return { key: 'group', dir: 'asc' };
 }
 
 // ============================================================
@@ -36,15 +39,36 @@ export function defaultReqSort() {
 // 存 localStorage 而不是 planStore：它是"这个人习惯怎么看"，属于界面偏好，
 // 不该进数据文件，更不该同步给别的使用者（各人关注点不同）。
 // 按 projectId 隔离：不同项目的关注范围本来就不一样。
+//
+// 快照版本 —— **每次换默认排序都要升一版**：
+//   v1 order（甘特图顺序） → v2 focus（关注度） → v3 group（进行中优先）
+//
+// 为什么要升版并丢掉旧版的排序：快照里的 sort 分不清是"当初的默认值"还是
+// "用户主动选的" —— 用户只改了个筛选，当时的默认排序也会被一起落盘。
+// 原样沿用，新默认排序对这些老用户就永远不生效（踩过：默认换成 group 后，
+// 老快照里的 order 被当成主动选择迁了过来，打开还是甘特图顺序）。
+// 故读到旧版快照时，只把**历史默认值**视作"没选过"（回到新默认），
+// 用户明确点过的其它键与全部筛选条件照常迁移，不让人重设一遍。
 // ============================================================
-const REQ_VIEW_LS = 'opsplan.reqView.v1';
+const REQ_VIEW_LS = 'opsplan.reqView.v3';
+const REQ_VIEW_LS_LEGACY = ['opsplan.reqView.v2', 'opsplan.reqView.v1'];
+// 历史上出现过的默认排序键（换默认时把被替掉的那个加进来）：见到即视为"没选过"
+const STALE_SORT_KEYS = ['order', 'focus'];
 
 function lsRead(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function lsWrite(key, val) { try { localStorage.setItem(key, val); } catch (e) { /* 隐私模式等写入失败，忽略 */ } }
 
 export function loadReqView(projectId) {
   const out = { filter: defaultReqFilter(), sort: defaultReqSort() };
-  const raw = lsRead(REQ_VIEW_LS + ':' + (projectId || 'default'));
+  const suffix = ':' + (projectId || 'default');
+  let legacy = false;   // true = 读到的是旧版快照（排序要按迁移规则过一遍）
+  let raw = lsRead(REQ_VIEW_LS + suffix);
+  if (!raw) {
+    for (const key of REQ_VIEW_LS_LEGACY) {
+      raw = lsRead(key + suffix);
+      if (raw) { legacy = true; break; }
+    }
+  }
   if (!raw) return out;
   let saved;
   try { saved = JSON.parse(raw); } catch (e) { return out; }
@@ -53,7 +77,8 @@ export function loadReqView(projectId) {
   if (saved && saved.filter) {
     Object.keys(out.filter).forEach(k => { if (saved.filter[k] != null) out.filter[k] = saved.filter[k]; });
   }
-  if (saved && saved.sort && saved.sort.key) {
+  // 老快照里如果是上一版默认排序，就用新默认；其余键是用户明确点过的，照常还原
+  if (saved && saved.sort && saved.sort.key && !(legacy && STALE_SORT_KEYS.includes(saved.sort.key))) {
     out.sort.key = saved.sort.key;
     out.sort.dir = saved.sort.dir === 'desc' ? 'desc' : 'asc';
   }
@@ -110,7 +135,13 @@ export function filterMods(mods, filter, deps) {
 }
 
 // ============================================================
-// 「关注度」排序（focus）：把当前最需要你动手的需求排到最上面。
+// 需求分层（tier）：把当前最需要你动手的需求排到最上面。
+//
+// 两个排序键共用这一份分层口径，**不要各写一套**（同一批数据排出两种结果，
+// 用户只会认为排序不可信）：
+//   focus —— 「关注度」：按下面 0~7 的紧急度细分，档内再按优先级、计划结束日排
+//   group —— 台账默认「进行中优先」：把 0~3 折叠成"进行中"一档（见 modGroupTier），
+//            档内保持甘特图顺序，可用拖动调整
 //
 // 为什么用分层桶而不是加权分数：分层的每一档都能直接讲给用户听，
 // 也能解释"这条为什么排第一"；加权分做不到——它只会吐出一个说不清的数字，
@@ -120,21 +151,30 @@ export function filterMods(mods, filter, deps) {
 //   0 已逾期   —— 有任务超期未完成，要救火
 //   1 进度落后 —— 尚未逾期，但完成度已低于应达（EV < PV）
 //   2 临近交付 —— 未完成且在 7 个自然日内到期
-//   3 待排期   —— 还没排期，需求躺着没人管，本身就是要处理的一件事
-//   4 正常推进 —— 进行中且不落后
+//   3 正常推进 —— 进行中且不落后
+//   4 待排期   —— 还没排期：日期不可信，不参与上面前四档的判定，整档排在推进中之后
 //   5 待启动   —— 还没开工
-//   6 已完成   —— 交付完成，沉底
+//   6 已完成   —— 交付完成，沉底（倒数第二）
 //   7 已归档   —— 留档查阅，最底
+//
+// 档位顺序 = 用户在台账里看到的分组顺序（进行中的永远最上，已完成倒数第二，
+// 已归档最后），调整任何一档的位置都要同步本注释与 tests/mod-query.test.js 的分层断言。
+//
+// 导出给渲染层：台账的拖拽排序只允许在同一档内换位，判定必须与排序同源，
+// 否则会出现"看着同组、判定不同组"的错位（见 views/req-view.js 的 data-req-tier）。
 // ============================================================
 const FOCUS_DUE_SOON_DAYS = 7;
 
-function focusTier(mo, deps) {
+export function modStageTier(mo, deps) {
   const { today, ctx, modRange } = deps || {};
   if (mo.archived) return 7;
   const tasks = (mo.bars || []).filter(b => b && !b.m);
   const allDone = tasks.length > 0 && tasks.every(b => (b.done || 0) >= 100);
   if (allDone) return 6;
-  if (mo.unscheduled) return 3;
+  // 待排期整档排在「推进中」之后：它没有可信的排期区间，无法判断逾期 / 落后 / 临近，
+  // 但也不该挤到正在推进的需求前面 —— 那会让"最该盯的"沉到一堆还没排期的需求下面。
+  // ⚠️ 位置仍在逾期 / 落后判定之前：待排期需求不参与那三档（日期不可信，不判它逾期）。
+  if (mo.unscheduled) return 4;
   const day = today instanceof Date ? today : F(today);
   if (tasks.some(b => isOverdueTask(b, day))) return 0;
   // 进度落后：需要 workday 才判得准（modStats 依赖 ctx），缺 ctx 时跳过这一档
@@ -148,7 +188,43 @@ function focusTier(mo, deps) {
     if (days <= FOCUS_DUE_SOON_DAYS) return 2;
   }
   const started = tasks.some(b => (b.done || 0) > 0 || (b.s && F(b.s) <= day));
-  return started ? 4 : 5;
+  return started ? 3 : 5;
+}
+
+// ============================================================
+// 「进行中优先」（group）的档位：把紧急度细分的前四档
+// （已逾期 / 进度落后 / 临近交付 / 正常推进）合成同一档 ——
+// 它们都属于"正在推进"，档内交给甘特图顺序，用户拖成什么样就是什么样。
+//
+// 为什么不再按紧急度提前：这个排序的用法是"先看在做的事，档内按我自己排的次序"。
+// 把逾期的单独拔到最上面，等于把它从用户排好的位置抽走 —— 每次状态一变，
+// 列表就自己重排一次，自定义的次序守不住。要看紧急度优先请用「关注度」（focus），
+// 它保留 0~3 的细分；两个排序共用 modStageTier，只是在这里折叠与否。
+// ============================================================
+export function modGroupTier(mo, deps) {
+  const t = modStageTier(mo, deps);
+  return t <= 3 ? 3 : t;   // 0~3 → 同一档；4 待排期 / 5 待启动 / 6 已完成 / 7 已归档 各自独立
+}
+
+// ============================================================
+// 按「默认排序」排列一批需求（= 台账默认的「进行中优先」）。
+//
+// 为什么收在这里而不是各视图各写一份 sort：总览的「排期总览 / 需求进度」与
+// 台账的默认列表讲的是同一件事 ——"先看正在推进的"。两处各排各的，用户会看到
+// 同一批需求在两张页面上次序不同，只会认为排序不可信（与 modStageTier 上面那条
+// "不要各写一套"的告诫同源）。
+//
+// 档内顺序刻意不引入任何二级键（保持传入数组本身的顺序）：那正是甘特图顺序，
+// 也是台账里能拖动调整的顺序 —— 总览与台账因此永远一致。
+//
+// deps 需要 { today, ctx, modRange }：状态判定与偏差都要用（口径见 modStageTier）。
+// ============================================================
+export function sortModsDefault(mods, deps) {
+  const list = [...(mods || [])];
+  return list
+    .map((mo, i) => ({ mo, i, tier: modGroupTier(mo, deps) }))
+    .sort((a, b) => (a.tier !== b.tier ? a.tier - b.tier : a.i - b.i))
+    .map(x => x.mo);
 }
 
 // 排序取值：{ v } 有值 / { miss: true } 无值。
@@ -200,11 +276,17 @@ function sortValue(mo, key, deps) {
       const go = findGoMs(mo);
       return go && go.m ? { v: go.m } : { miss: true };
     }
+    // 进行中优先（group，台账默认）：只分档，档内**不引入任何二级键** ——
+    // 保持甘特图顺序（数据里的需求顺序），台账里拖出来的次序才守得住。
+    // 分档见 modGroupTier：逾期的不会单独提前，与其它"在推进的"同档。
+    // sortMods 本身是稳定排序，同值按原索引先后排，故这里返回裸档位就够。
+    case 'group':
+      return { v: modGroupTier(mo, deps) };
     // 关注度：分层 → 优先级 → 计划结束日，三级压进一个数。
     // 量级刻意拉开（1e9 / 1e7），保证"分层永远压过优先级，优先级永远压过日期"——
     // 否则「高优先级但还早」会插到「低优先级但已逾期」前面，正好违背初衷。
     case 'focus': {
-      const tier = focusTier(mo, deps);
+      const tier = modStageTier(mo, deps);
       const pi = PRIORITIES.indexOf(mo.pri);
       const priRank = pi < 0 ? PRIORITIES.length : pi;   // 未设优先级排在同档最后
       let dayScore = 1000;                                // 无排期居中，不因缺日期而占便宜

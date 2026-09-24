@@ -219,7 +219,9 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .fold-done{position:absolute;top:0;bottom:0;left:0;border-radius:3px 0 0 3px;min-width:0;box-shadow:inset -1px 0 #0f172a24}
 .mname[draggable=true]{cursor:grab;-webkit-user-select:none;user-select:none}
 .mname[draggable=true]:active{cursor:grabbing}
-.mname[draggable=true]:after{content:"";position:absolute;right:2px;top:50%;transform:translateY(-50%);width:2px;height:14px;border-radius:2px;background:repeating-linear-gradient(180deg,#c3cbdb 0 3px,transparent 3px 6px);opacity:0;transition:opacity .15s}
+/* 与台账行同一套拖动提示：三个纯色小圆点（同样避开渐变条纹的摩尔纹） */
+.mname[draggable=true]:after{content:"";position:absolute;right:3px;top:50%;width:2px;height:2px;margin-top:-1px;
+  border-radius:50%;background:#c3cbdb;box-shadow:0 5px 0 #c3cbdb,0 -5px 0 #c3cbdb;opacity:0;transition:opacity .15s}
 .row:hover .mname[draggable=true]:after{opacity:1}
 .row.dragging{opacity:.4}
 .row.drop-hint-before,.row.drop-hint-after{position:relative;z-index:6}
@@ -315,14 +317,19 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
   --ctl-cal:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round'><rect x='3' y='5' width='18' height='16' rx='2.5'/><path d='M8 3v4M16 3v4M3 11h18'/></svg>");
 }
 
-/* ---- 统一外观：七处控件共用同一份基线 ---- */
+/* ---- 统一外观：全项目表单控件共用同一份基线 ----
+   ⚠️ 底色一律写 background-color，**不要用 background 简写**：
+   简写会把 background-repeat 重置回 repeat，而下拉框的箭头是一枚 10×6 的 SVG 背景图 ——
+   悬停 / 聚焦 / 禁用这几条伪类规则特异性更高，会连图带 repeat 一起重置，
+   箭头于是被平铺成满框的斜纹（看着像"波浪线"，只在鼠标停上去时才露出来）。 */
 :is(.f-row input[type=text], .f-row input[type=number], .f-row input[type=date],
-    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input){
+    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input,
+    .ver-mod-move){
   min-height:var(--ctl-h);
   padding:6px var(--ctl-px);
   border:1px solid var(--ctl-bd);
   border-radius:var(--ctl-radius);
-  background:var(--ctl-bg);
+  background-color:var(--ctl-bg);
   color:var(--ctl-ink);
   font-family:inherit;
   font-size:var(--ctl-font);
@@ -333,20 +340,23 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 }
 /* 悬停：原先完全没有，控件看着"死"。只改描边与底色，不动尺寸，避免布局跳动 */
 :is(.f-row input[type=text], .f-row input[type=number], .f-row input[type=date],
-    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input):hover:not(:disabled){
+    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input,
+    .ver-mod-move):hover:not(:disabled){
   border-color:var(--ctl-bd-hover);
-  background:var(--ctl-bg-hover);
+  background-color:var(--ctl-bg-hover);
 }
 /* 聚焦：统一的可见焦点环（键盘可达性要求，也是"有反馈"的关键） */
 :is(.f-row input[type=text], .f-row input[type=number], .f-row input[type=date],
-    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input):focus{
+    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input,
+    .ver-mod-move):focus{
   border-color:var(--blue);
-  background:var(--ctl-bg);
+  background-color:var(--ctl-bg);
   box-shadow:0 0 0 3px var(--accent-ring);
 }
 :is(.f-row input[type=text], .f-row input[type=number], .f-row input[type=date],
-    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input):disabled{
-  background:var(--ctl-bg-disabled);
+    .f-row select, .dep-add select, .modal .f-row select, .req-q, .req-f, .dep-lag-input,
+    .ver-mod-move):disabled{
+  background-color:var(--ctl-bg-disabled);
   color:var(--ctl-ink-disabled);
   border-color:var(--ctl-bd);
   box-shadow:none;
@@ -357,7 +367,7 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 /* ---- 下拉框：全项目统一自绘箭头 ---- */
 /* 浏览器默认箭头各平台长得都不一样，且无法调色，是"生硬"最直观的来源。
    .mod-phase-grid select 早就用了这套自绘方案，这里推广到全部 select。 */
-:is(.f-row select, .dep-add select, .modal .f-row select, .req-f){
+:is(.f-row select, .dep-add select, .modal .f-row select, .req-f, .ver-mod-move){
   -webkit-appearance:none;
   appearance:none;
   padding-right:28px;
@@ -366,26 +376,73 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
   background-position:right 9px center;
   cursor:pointer;
 }
-:is(.f-row select, .dep-add select, .modal .f-row select, .req-f):hover:not(:disabled){
+/* hover 只换箭头深浅，repeat / position 一并重复声明：
+   万一将来又有哪条兄弟规则用了 background 简写，也不会把箭头平铺满框 */
+:is(.f-row select, .dep-add select, .modal .f-row select, .req-f, .ver-mod-move):hover:not(:disabled){
   background-image:var(--ctl-arrow);
+  background-repeat:no-repeat;
+  background-position:right 9px center;
 }
 
 /* ---- 日期框：替换 Chrome 默认的黑色日历图标 ---- */
 /* ::-webkit-calendar-picker-indicator 默认是浏览器自带的实心黑图标，
    与整套 slate 配色冲突；换成同族描边日历，并保留悬停加深。 */
+/* 原生图标只是元素内部那一小块区域 —— 点击行为也只发生在它上面，故把它透明化占位，
+   改由外层的 .df-ic 自绘（配合 JS 把整块 .date-field 变成点击热区）。
+   保留它本身是为了不动键盘操作与原生无障碍语义。 */
 :is(.f-row input[type=date])::-webkit-calendar-picker-indicator{
   width:16px;
   height:16px;
   margin-left:2px;
   padding:0;
   cursor:pointer;
-  opacity:.75;
-  background:var(--ctl-cal) center / contain no-repeat;
+  opacity:0;
   transition:opacity .15s ease;
 }
-:is(.f-row input[type=date])::-webkit-calendar-picker-indicator:hover{opacity:1}
 /* 数字框的上下微调箭头：保留功能但压暗，避免抢视线 */
 :is(.f-row input[type=number])::-webkit-inner-spin-button{opacity:.45}
+
+/* ---- 提出时间：整块可点 ---- */
+/* 为什么包一层：日期框只在右侧那枚内建图标上响应点击，中间显示日期的文字区点了毫无反应 ——
+   "这里怎么点不动"多半就是这个。JS 把整块 .date-field 接管（见 components/modals.js），
+   点框内任意位置都 showPicker()；日期框本体的 click 除外，好让光标定位 / 选中数字照常。 */
+.date-field{position:relative;display:flex;align-items:stretch;flex:1;min-width:0}
+/* 输入框自己铺满整块，点击的处理也就绑在它身上（见 components/modals.js）。
+   不要再加 pointer-events:none —— 那会让输入框失去焦点能力，得不偿失。 */
+.date-field input[type=date]{width:100%;padding-right:38px;cursor:pointer}
+/* 自绘日历图标：不接收 pointer-events，点击一律由 .date-field 的委托处理，
+   免得出现"点在图标上反而没弹窗"这种半生效状态 */
+.df-ic{position:absolute;right:11px;top:50%;transform:translateY(-50%);width:16px;height:16px;
+  pointer-events:none;opacity:.7;background:var(--ctl-cal) center / contain no-repeat;transition:opacity .15s}
+.date-field:hover .df-ic{opacity:1}
+
+/* ---- 描述：多行输入 ---- */
+/* 原先光秃秃一个 textarea，与旁边的输入框既不同高也不同色，看着像贴错了控件。
+   这里把它拉进同一套基线：同样的描边 / 圆角 / 内边距 / 悬停与聚焦环。 */
+.ta-field{position:relative;display:flex;min-width:0}
+.f-row textarea{
+  flex:1;min-width:0;min-height:92px;
+  padding:9px var(--ctl-px);
+  border:1px solid var(--ctl-bd);
+  border-radius:var(--ctl-radius);
+  background-color:var(--ctl-bg);
+  color:var(--ctl-ink);
+  font-family:inherit;font-size:var(--ctl-font);line-height:1.65;
+  outline:none;resize:vertical;
+  box-shadow:0 1px 2px #0f172a0a;
+  transition:border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.f-row textarea:hover{border-color:var(--ctl-bd-hover);background-color:var(--ctl-bg-hover)}
+.f-row textarea:focus{border-color:var(--blue);background-color:var(--ctl-bg);box-shadow:0 0 0 3px var(--accent-ring)}
+.f-row textarea::placeholder{color:var(--ctl-ph)}
+/* 自绘 resize 手柄：原生那三撇在浅色面板上几乎看不见，也给不了"能拖大"的暗示 */
+.ta-resize{position:absolute;right:3px;bottom:3px;width:12px;height:12px;pointer-events:none;opacity:.6;
+  background:repeating-linear-gradient(-45deg,transparent 0 2px,var(--ctl-bd-hover) 2px 3.5px)}
+
+/* ---- 优先级 / 生命周期：下拉 ---- */
+/* 宽度收到内容所需即可：整行宽的 select 在窄抽屉里显得笨重，
+   而这两个字段的选项都很短（"P0 · 最高" / "已提测"） */
+.mod-meta-select{width:100%;max-width:220px}
 
 .f-row{display:flex;flex-direction:column;gap:6px;min-width:0}
 .f-row .dates{min-width:0}
@@ -978,15 +1035,19 @@ body.readonly-mode .ver-act{display:none}
 .ver-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .ver-hint{flex:1;min-width:220px;font-size:11px;color:#94a3b8;line-height:1.6}
 .ver-list{display:flex;flex-direction:column;gap:10px}
+/* 分页条：版本页列表底部。一页装得下时整条不渲染（见 version-view.js 的 pager） */
+.ver-pager{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:14px 4px 2px}
+.ver-page-txt{font-size:11px;color:#64748b;font-variant-numeric:tabular-nums}
+.ver-page-btn:disabled{opacity:.45;cursor:not-allowed}
 .ver-card{background:#fff;border:1px solid #e8edf5;border-radius:12px;box-shadow:0 1px 2px #0f172a0a;transition:border-color .2s,box-shadow .2s}
 .ver-card:hover{border-color:var(--accent-line);box-shadow:0 6px 18px -8px var(--accent-ring)}
-.ver-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;min-height:52px}
+/* 头行整行可点 = 展开/收起（三角仍保留，给键盘与"这里能点"的显式暗示） */
+.ver-hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;min-height:52px;cursor:pointer;-webkit-user-select:none;user-select:none}
 .ver-name{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:800;color:#0f1729}
 .ver-date{font-size:11.5px;font-weight:700;color:#0f1729;font-variant-numeric:tabular-nums}
 .ver-actual{font-size:11px;font-weight:700;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;padding:1px 7px;font-variant-numeric:tabular-nums}
 .ver-count,.ver-range{font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
 .ver-pct{font-size:11.5px;font-weight:800;color:#0f1729;font-variant-numeric:tabular-nums}
-.ver-late{font-size:10.5px;font-weight:800;color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:1px 7px;white-space:nowrap}
 .ver-spacer{flex:1}
 .ver-arr{flex:none;border:none;background:none;padding:4px 6px;font-size:11px;color:#94a3b8;cursor:pointer;font-family:inherit}
 .ver-arr:hover{color:var(--accent)}
@@ -996,10 +1057,9 @@ body.readonly-mode .ver-act{display:none}
 .ver-mod-name{flex:1 1 160px;min-width:0;display:flex;align-items:center;gap:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:700;color:#0f1729}
 .ver-mod-range{flex:none;width:96px;text-align:right;font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
 .ver-mod-pct{flex:none;width:38px;text-align:right;font-size:11px;font-weight:800;color:#0f1729;font-variant-numeric:tabular-nums}
-.ver-mod-flag{flex:none;font-size:10px;font-weight:700;border-radius:6px;padding:1px 7px;white-space:nowrap;font-variant-numeric:tabular-nums}
-.ver-mod-flag.ok{color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4}
-.ver-mod-flag.late{color:#b91c1c;background:#fef2f2;border:1px solid #fecaca}
-.ver-mod-flag.muted{color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0}
+/* 改版本下拉：外观走统一控件基线（见上），这里只定宽 —— 版本名长短不一，
+   不设上限会把排期/完成度挤走 */
+.ver-mod-move{flex:none;max-width:132px;text-overflow:ellipsis}
 .ver-mod-x{flex:none;border:none;background:none;padding:0 4px;font-size:15px;line-height:1;color:#cbd5e1;cursor:pointer;font-family:inherit}
 .ver-mod-x:hover{color:#dc2626}
 .ver-mod-empty{padding:14px 6px;font-size:12px;color:#94a3b8}
@@ -1034,6 +1094,17 @@ body.readonly-mode .ver-act{display:none}
 .req-count{margin-left:auto;font-size:11.5px;color:#64748b;font-variant-numeric:tabular-nums}
 /* 列多时横向滚动，不挤压内容 */
 .req-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* 新建需求后的定位高亮：让"刚建的那条"从一屏数据里跳出来，1.6s 后自动淡出
+   （时长与 req-page.js 里移除 class 的定时器保持一致） */
+.req-row.is-flash{animation:reqFlash 1.6s ease-out}
+@keyframes reqFlash{
+  0%,100%{background-color:transparent}
+  12%,55%{background-color:var(--accent-soft)}
+}
+/* 尊重系统的"减少动效"偏好：改成静态描边提示，不再闪烁 */
+@media (prefers-reduced-motion:reduce){
+  .req-row.is-flash{animation:none;box-shadow:inset 0 0 0 2px var(--accent)}
+}
 .req-table{width:100%;border-collapse:collapse;font-size:12.5px}
 .req-table th{position:sticky;top:0;z-index:1;background:#f8fafc;text-align:left;font-size:11.5px;font-weight:800;color:#475569;
   padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
@@ -1048,6 +1119,26 @@ body.readonly-mode .ver-act{display:none}
 .req-row:hover{background:var(--accent-soft)}
 .req-c-name{min-width:180px}
 .req-c-name b{font-weight:800;color:#0f1729;margin-left:6px}
+/* 拖动调整组内顺序：手柄是首列的整个名称格（由渲染层只在「进行中优先」排序下给出
+   data-req-drag），靠 grab 光标 + hover 时浮现的双点提示"这儿能拖" */
+.req-c-name[data-req-drag]{cursor:grab}
+.req-c-name[data-req-drag]:active{cursor:grabbing}
+/* 拖动提示画成三个纯色小圆点，特意不用 repeating-linear-gradient 的条纹 ——
+   2px 宽的渐变在缩放 / 小尺寸下会渲染出波浪状的摩尔纹，像一条脏线；
+   拖动柄只是个"这儿能拖"的提示，不该抢注意力 */
+.req-c-name[data-req-drag]:after{content:"";display:inline-block;width:2px;height:2px;margin-left:7px;vertical-align:5px;
+  border-radius:50%;background:#c3cbdb;box-shadow:0 5px 0 #c3cbdb,0 -5px 0 #c3cbdb;opacity:0;transition:opacity .15s}
+.req-row:hover .req-c-name[data-req-drag]:after{opacity:1}
+/* 拖动态：源行与"落不了的那几档"一起变淡（.req-dim 由 req-page.js 按档位批量加），
+   只留同一档的行清晰 —— 可拖范围一眼可见，不必靠试错去发现 */
+.req-row.dragging{opacity:.45}
+.req-dragging .req-row.req-dim{opacity:.4}
+/* 落点提示画成单元格内阴影而不是 border：border 会撑高行，拖动时整张表跟着跳 */
+.req-row.drop-hint-before>td{box-shadow:inset 0 2px 0 var(--blue)}
+.req-row.drop-hint-after>td{box-shadow:inset 0 -2px 0 var(--blue)}
+/* 只读（导出的查看器 / 只读模式）不给可拖的暗示；事件层也已拦住拖拽 */
+body.readonly-mode .req-c-name[data-req-drag]{cursor:default}
+body.readonly-mode .req-c-name[data-req-drag]:after{display:none}
 .req-badge-arch{display:inline-block;margin-left:6px;font-size:10px;font-weight:800;color:#64748b;
   background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;white-space:nowrap}
 .req-sub{margin-left:6px;font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
@@ -1068,17 +1159,12 @@ body.readonly-mode .ver-act{display:none}
 /* 排期与进度合并列：排期区间在上、完成度在下，整体允许换行 */
 .req-c-plan{white-space:normal}
 .req-c-plan .req-c-pct{display:block;margin-top:3px}
-/* 上线情况允许换行：状态徽标 + 计划 / 实际日期 + 「赶不上」提示，窄列时折成多行 */
-.req-c-ship{white-space:normal}
-.req-c-ship .tag{white-space:nowrap}
 /* 偏差文字：与卡片 .rmod-devi 同一套语义色 */
 .req-devi{margin-left:6px;font-size:10.5px;font-weight:800;font-variant-numeric:tabular-nums}
 .req-devi.late{color:#dc2626}
 .req-devi.ahead{color:#0f766e}
 .req-devi.on{color:#64748b}
-.req-late{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:800;color:#b91c1c;background:#fef2f2;
-  border:1px solid #fecaca;border-radius:6px;padding:1px 6px;white-space:nowrap}
-/* ============ 台账行内编辑（生命周期 / 提出人）============
+/* ============ 台账行内编辑（生命周期 / 提出人 / 所属版本）============
    展示版与编辑版同时渲染，按只读状态二选一 —— 与操作列 .req-act 同一套机制
    （body.readonly-mode 由 utils/readonly.js 维护），渲染层因此不必知道只读。 */
 .req-inline-edit{display:none}
@@ -1097,6 +1183,16 @@ body:not(.readonly-mode) .req-inline-view{display:none}
   padding-right:15px;background-repeat:no-repeat;background-position:right 3px center;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M1.5 3L4 5.5L6.5 3' fill='none' stroke='%2364748b' stroke-width='1.2' stroke-linecap='round'/></svg>")}
 .req-inline-lc:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+/* 所属版本：平时就是一行文字（与相邻列的观感一致），悬停 / 聚焦才显出是可换的下拉；
+   选中项文字可能很长（"V1（10/29）"），故限宽 + 省略号，不让它把列撑开 */
+.req-inline-ver{max-width:132px;display:inline-block;appearance:none;-webkit-appearance:none;cursor:pointer;
+  font-size:11.5px;color:#334155;text-overflow:ellipsis;
+  background-color:transparent;border:1px solid transparent;border-radius:5px;padding:2px 15px 2px 4px;
+  background-repeat:no-repeat;background-position:right 3px center;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><path d='M1.5 3L4 5.5L6.5 3' fill='none' stroke='%2364748b' stroke-width='1.2' stroke-linecap='round'/></svg>")}
+.req-inline-ver:hover{background-color:#f8fafc;border-color:#e2e8f0}
+.req-inline-ver:focus{background-color:#fff;border-color:var(--accent);outline:none}
 
 .req-ops{white-space:nowrap}
 .req-ops .btn{margin-right:4px}
@@ -1127,7 +1223,6 @@ body.readonly-mode .req-act{display:none}
 .req-kv>span{display:flex;gap:8px;font-size:12px;color:#334155}
 .req-kv i{flex:none;width:66px;font-style:normal;color:#94a3b8}
 .req-kv b{font-weight:700}
-.req-late-note{margin:6px 0 0;font-size:11.5px;color:#b91c1c;line-height:1.6}
 .req-ms-list{display:flex;flex-wrap:wrap;gap:8px}
 .req-ms{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#334155;background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 8px}
 .req-ms b{font-variant-numeric:tabular-nums;color:#0f1729}

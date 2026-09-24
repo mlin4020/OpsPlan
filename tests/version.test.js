@@ -14,7 +14,7 @@ import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { createPersistence } from '../src/scheduler/persistence.js';
 import {
-  versionOfMap, versionProgress, versionStatus, modLate, sortVersions, isGoMs, findGoMs
+  versionOfMap, versionProgress, versionStatus, sortVersions, isGoMs, findGoMs
 } from '../src/core/versions.js';
 
 // node 环境无全局 localStorage（save 内部 try/catch 也兜底，这里显式提供）
@@ -204,6 +204,80 @@ describe('版本：加入 / 改期 / 移出 / 删除的排期联动', () => {
   });
 });
 
+// 需求台账「所属版本」的行内下拉：一次改归属。
+// 原先只能进版本弹窗"先取消勾选、再去另一个版本勾选"——两步，且中间态是"无版本"。
+describe('版本：台账行内直接改归属（setModuleVersion）', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  it('从 V1 改到 V2：两个版本的名单同时更新，上线日跟新版本走', () => {
+    const sched = makeSched();
+    const v1 = sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版', '数据看板'] }).version;
+    const v2 = sched.createVersion({ name: 'V2', date: '2026-11-30' }).version;
+
+    const r = sched.setModuleVersion('官网改版', v2.id);
+    expect(r.changed).toBe(true);
+    expect(r.from.id).toBe(v1.id);
+    expect(r.to.id).toBe(v2.id);
+    expect(versions()[0].mods).toEqual(['数据看板']);   // 原版本自动移出，不必手动取消勾选
+    expect(versions()[1].mods).toEqual(['官网改版']);
+    expect(goMs('官网改版').m).toBe('2026-11-30');      // 钉到新版本的上线日
+    expect(goMs('官网改版').manual).toBe(true);
+    expect(goMs('数据看板').m).toBe('2026-10-29');      // 同版本的另一条不受影响
+  });
+
+  it('改成「未加入版本」：解锁并回落到依赖算出的日期', () => {
+    const sched = makeSched();
+    sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] });
+
+    const r = sched.setModuleVersion('官网改版', null);
+    expect(r.changed).toBe(true);
+    expect(r.to).toBe(null);
+    expect(versions()[0].mods).toEqual([]);
+    expect(goMs('官网改版').manual).toBe(false);
+    expect(goMs('官网改版').m).toBe('2026-09-09');   // 默认数据里原本的自动上线日
+  });
+
+  it('选到当前已属的版本 / 本来就无版本：算无变化，不动数据', () => {
+    const sched = makeSched();
+    const v = sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] }).version;
+    expect(sched.setModuleVersion('官网改版', v.id).changed).toBe(false);
+    expect(sched.setModuleVersion('数据看板', null).changed).toBe(false);
+    expect(versions()[0].mods).toEqual(['官网改版']);
+  });
+
+  it('已归档需求不能改入版本：抛错说明原因（下拉靠它回滚）', () => {
+    const sched = makeSched();
+    const v = sched.createVersion({ name: 'V1', date: '2026-10-29' }).version;
+    sched.archiveModule('数据看板', true);
+    expect(() => sched.setModuleVersion('数据看板', v.id)).toThrow('已归档');
+    expect(versions()[0].mods).toEqual([]);
+  });
+
+  it('待排期需求改入版本：先只登记成员，改为「已排期」后才钉上线日', () => {
+    const sched = makeSched();
+    sched.addModule({ name: '待排期需求', autoCreate: false, unscheduled: true });
+    const v = sched.createVersion({ name: 'V1', date: '2026-10-29' }).version;
+
+    sched.setModuleVersion('待排期需求', v.id);
+    expect(versions()[0].mods).toEqual(['待排期需求']);
+    expect(goMs('待排期需求')).toBeFalsy();           // 日期还不可信，不钉
+
+    sched.updateModule({ name: '待排期需求', unscheduled: false });
+    expect(goMs('待排期需求').m).toBe('2026-10-29');
+  });
+
+  it('只读模式：静默失效，两边名单都不动', () => {
+    const sched = makeSched();
+    sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] });
+    const v2 = sched.createVersion({ name: 'V2', date: '2026-11-30' }).version;
+    userStore.set({ readonly: true });
+
+    expect(sched.setModuleVersion('官网改版', v2.id)).toBe(null);
+    expect(versions()[0].mods).toEqual(['官网改版']);
+    expect(versions()[1].mods).toEqual([]);
+  });
+});
+
 describe('版本：序列化白名单（漏一处就静默丢数据）', () => {
   beforeEach(() => { planStore.reset(); userStore.reset(); });
 
@@ -261,7 +335,7 @@ describe('版本：序列化白名单（漏一处就静默丢数据）', () => {
   });
 });
 
-describe('版本：状态 / 完成度 / 赶不上判定', () => {
+describe('版本：状态 / 完成度', () => {
   const state = () => planStore.state;
 
   beforeEach(() => {
@@ -289,20 +363,6 @@ describe('版本：状态 / 完成度 / 赶不上判定', () => {
     expect(st.pct).toBeLessThan(100);
   });
 
-  it('「赶不上」：成员最晚完成日晚于版本上线日才报警；待排期需求不参与', () => {
-    const v = { id: 'v1', name: 'V1', date: '2026-10-29', mods: ['官网改版'] };
-    expect(modLate(v, findMod('官网改版'))).toBe(null);       // 默认数据 9/9 就完成了
-
-    const tight = { ...v, date: '2026-09-01' };
-    const late = modLate(tight, findMod('官网改版'));
-    expect(late).toBeTruthy();
-    expect(late.days).toBeGreaterThan(0);
-
-    // 待排期需求：日期不可信 → 不参与判定（否则版本页会满屏假警报）
-    const un = { name: '待排期X', unscheduled: true, bars: [{ id: 't', p: 'dev', s: '2026-12-01', e: '2026-12-31' }] };
-    expect(modLate(tight, un)).toBe(null);
-  });
-
   it('版本状态：已上线 > 待上线 > 已逾期 > 进行中 > 未开始', () => {
     const today = new Date(2026, 8, 21);   // 2026-09-21
     const task = (s, e, done) => ({ id: s + done, p: 'dev', s, e, done, res: ['张三'] });
@@ -322,12 +382,14 @@ describe('版本：状态 / 完成度 / 赶不上判定', () => {
     expect(keyOf('2026-10-30', futureMods)).toBe('todo');    // 未到期且都还没开工
   });
 
-  it('版本排序按上线日升序（最近要上的排最前）', () => {
+  it('版本排序按上线日倒序（最新的排最前），缺日期的排最后', () => {
     const list = sortVersions([
+      { id: 'a', name: 'V1', date: '2026-10-01' },
       { id: 'b', name: 'V2', date: '2026-12-01' },
-      { id: 'a', name: 'V1', date: '2026-10-01' }
+      { id: 'c', name: 'V3', date: '2026-11-01' },
+      { id: 'd', name: '无日期' }
     ]);
-    expect(list.map(v => v.name)).toEqual(['V1', 'V2']);
+    expect(list.map(v => v.name)).toEqual(['V2', 'V3', 'V1', '无日期']);
   });
 });
 
@@ -358,6 +420,29 @@ describe('版本页面：渲染契约', () => {
     expect(html).toContain('官网改版');
     // 成员行的"×"带版本 id 与需求名，供组件层委托使用
     expect(html).toMatch(/data-ver-remove="[^"]+" data-mod="官网改版"/);
+    // 卡头整行可点开（三角仍是显式入口）
+    expect(html).toMatch(/<div class="ver-hd" data-ver-toggle="/);
+  });
+
+  it('成员行的「改版本」下拉：有别的版本才给，且只列版本（移出交给 ×）', async () => {
+    const { renderVersionView, toggleVersionExpanded } = await import('../src/views/version-view.js');
+    const { buildViewCtx } = await import('../src/views/index.js');
+    const sched = makeSched();
+    const v1 = sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] }).version;
+    const view = () => renderVersionView({}, buildViewCtx({
+      state: planStore.state, sched, today: new Date(2026, 8, 21), workday: createWorkday({}), holidays: []
+    }));
+
+    toggleVersionExpanded(v1.id);
+    // 只有一个版本时不给下拉：唯一选项就是它自己
+    expect(view()).not.toContain('data-ver-move');
+
+    const v2 = sched.createVersion({ name: 'V2', date: '2026-11-30' }).version;
+    const html = view();
+    toggleVersionExpanded(v1.id);   // 复位，别把展开态留给后面的用例
+    expect(html).toMatch(new RegExp(`data-ver-move="${v1.id}" data-mod="官网改版"`));
+    expect(html).toContain(`<option value="${v1.id}" selected>V1（10/29）</option>`);
+    expect(html).toContain(`<option value="${v2.id}">V2（11/30）</option>`);
   });
 
   it('没有版本时渲染空态与「新建版本」按钮', async () => {
@@ -376,23 +461,31 @@ describe('版本页面：渲染契约', () => {
     expect(html).toContain('data-ver-new');
   });
 
-  it('总览「风险与关注点」包含版本赶不上预警', async () => {
-    const { renderReportView } = await import('../src/views/report-view.js');
+  it('需求台账「所属版本」列是可换版本的下拉（不再是纯展示）', async () => {
+    const { renderReqView, toggleReqExpanded } = await import('../src/views/req-view.js');
     const { buildViewCtx } = await import('../src/views/index.js');
     const sched = makeSched();
-    sched.createVersion({ name: 'V1', date: '2026-09-01', mods: ['官网改版'] });
+    const v = sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] }).version;
 
     const ctx = buildViewCtx({
       state: planStore.state,
       sched,
       today: new Date(2026, 8, 21),
       workday: createWorkday({}),
-      holidays: [],
-      zoom: 'day', collapsed: {}
+      holidays: []
     });
-    const html = renderReportView({}, ctx);
-    expect(html).toContain('rr-type ver');
-    expect(html).toContain('赶不上');
+    const html = renderReqView({}, ctx);
+    // data-prev = 当前归属的版本 id：组件层靠它与选中值比对，相同就不写数据
+    expect(html).toContain(`data-req-inline="version" data-name="官网改版" data-prev="${v.id}"`);
+    expect(html).toContain('<option value="">未加入版本</option>');
+    expect(html).toContain(`<option value="${v.id}" selected>V1（10/29）</option>`);
+
+    // 展开档案里的「所属版本」同样能换（那里是细读这一栏的地方，两份都要能用）
+    toggleReqExpanded('官网改版');
+    const expanded = renderReqView({}, ctx);
+    toggleReqExpanded('官网改版');   // 复位，别把展开态留给后面的用例
+    expect(expanded).toContain('<i>所属版本</i>');
+    expect((expanded.match(/data-req-inline="version"/g) || []).length).toBeGreaterThanOrEqual(2);
   });
 
   it('需求卡片与甘特需求行带版本徽标（新增需求不加、不加进版本就没有）', async () => {
@@ -499,5 +592,220 @@ describe('versions: 上线里程碑识别（isGoMs / findGoMs）', () => {
     expect(findGoMs({ name: 'A', bars: [{ id: 'x', m: '2026-09-09', p: 'sit', label: '提测' }] })).toBe(null);
     expect(findGoMs({ name: 'A' })).toBe(null);
     expect(findGoMs(null)).toBe(null);
+  });
+});
+
+// 版本页成员行「改版本」下拉的委托行为。
+// 与 tests/req-page.test.js 同一套路：捕获 change 处理器，用假 event.target 直接驱动 ——
+// 只断言"动了下拉 → 调了什么、界面怎么回滚"，不需要真 DOM。
+describe('版本页面：成员行改版本的委托', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  // els：弹窗控件的桩（modal 相关用例才需要）；不传时 getEl 一律 null
+  function makeEnv(sched, els) {
+    const calls = [];
+    const handlers = {};
+    const deps = {
+      doc: {},
+      getEl: id => (els && els[id]) || null,
+      gantt: { addEventListener: (type, fn) => { handlers[type] = fn; } },
+      planStore,
+      sched: sched || {
+        setModuleVersion: (name, id) => { calls.push(['move', name, id]); return { to: { id, name: 'V2' } }; }
+      },
+      toast: m => calls.push(['toast', m]),
+      today: () => new Date(2026, 8, 21),
+      render: () => calls.push(['render'])
+    };
+    return import('../src/components/version-page.js').then(({ bindVersionPage }) => {
+      bindVersionPage(deps);
+      return { calls, change: e => handlers.change(e), click: e => handlers.click(e) };
+    });
+  }
+
+  // 造 n 个版本：V1（1 月上线）… Vn（n 月上线）。
+  // 上线日倒序 → Vn 最前，故每页 6 个时第 2 页是"最旧的那几个"，方便断言翻页
+  function seedVersions(sched, n) {
+    const out = {};
+    for (let i = n; i >= 1; i--) {
+      out[i] = sched.createVersion({ name: 'V' + i, date: `2026-${String(i).padStart(2, '0')}-10` }).version;
+    }
+    return out;
+  }
+
+  // 假元素保持同一引用：失败 / 只读时要断言它被回滚成原值
+  function moveEvent(dataset, value) {
+    const el = { dataset, value };
+    return { el, evt: { target: { closest: sel => (sel === '[data-ver-move]' ? el : null) } } };
+  }
+
+  it('选到另一个版本：调 setModuleVersion + 重绘 + 提示，并把目标卡展开', async () => {
+    const { isVersionExpanded, toggleVersionExpanded } = await import('../src/views/version-view.js');
+    const env = await makeEnv();
+    env.change(moveEvent({ verMove: 'ver_1', mod: '官网改版' }, 'ver_2').evt);
+
+    expect(env.calls).toContainEqual(['move', '官网改版', 'ver_2']);
+    expect(env.calls).toContainEqual(['render']);
+    expect(env.calls).toContainEqual(['toast', '已把「官网改版」调整到「V2」']);
+    // 不展开目标卡的话，改完那一行会从当前卡里消失，界面上等于"点完没反应"
+    expect(isVersionExpanded('ver_2')).toBe(true);
+    toggleVersionExpanded('ver_2');   // 复位，别把展开态留给后面的用例
+  });
+
+  it('选回当前版本 / 空值：不写数据也不重绘', async () => {
+    const env = await makeEnv();
+    env.change(moveEvent({ verMove: 'ver_1', mod: '官网改版' }, 'ver_1').evt);
+    env.change(moveEvent({ verMove: 'ver_1', mod: '官网改版' }, '').evt);
+    expect(env.calls.some(c => c[0] === 'move' || c[0] === 'render')).toBe(false);
+  });
+
+  it('只读：不改数据，并把下拉回滚到原版本', async () => {
+    userStore.set({ readonly: true });
+    const env = await makeEnv();
+    const { el, evt } = moveEvent({ verMove: 'ver_1', mod: '官网改版' }, 'ver_2');
+    env.change(evt);
+    expect(el.value).toBe('ver_1');
+    expect(env.calls.some(c => c[0] === 'move')).toBe(false);
+  });
+
+  it('失败（如已归档需求）：回滚下拉并报错，不停在"已改好"的样子', async () => {
+    const env = await makeEnv({
+      setModuleVersion: () => { throw new Error('已归档需求不能加入版本，请先取消归档'); }
+    });
+    const { el, evt } = moveEvent({ verMove: 'ver_1', mod: '官网改版' }, 'ver_2');
+    env.change(evt);
+    expect(el.value).toBe('ver_1');
+    expect(env.calls).toContainEqual(['toast', '已归档需求不能加入版本，请先取消归档']);
+    expect(env.calls.some(c => c[0] === 'render')).toBe(false);
+  });
+
+  it('改版本后翻到目标版本所在的那一页（分页后不翻页就等于"需求不见了"）', async () => {
+    const { setVersionPage, getVersionPage, versionPageOf } = await import('../src/views/version-view.js');
+    const sched = makeSched();
+    const v = seedVersions(sched, 8);
+    setVersionPage(1);   // 从 V8 挪到 V1：V1 在最后一页
+
+    const env = await makeEnv();
+    env.change(moveEvent({ verMove: v[8].id, mod: '官网改版' }, v[1].id).evt);
+
+    expect(getVersionPage()).toBe(versionPageOf(planStore.state, v[1].id));
+    expect(getVersionPage()).toBe(2);
+    setVersionPage(1);   // 复位，别把页码留给后面的用例
+  });
+});
+
+// 版本页列表的分页：每页 6 个，一页装得下就不渲染分页条。
+// 「新建完看不见自己刚建的版本」是分页最容易踩的坑，故这里连翻页行为一起盯住。
+describe('版本页面：列表分页', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  function makeView() {
+    return import('../src/views/version-view.js').then(async (mod) => {
+      const { buildViewCtx } = await import('../src/views/index.js');
+      const sched = createScheduler({ planStore, userStore, W: createWorkday({}) });
+      return {
+        ...mod,
+        sched,
+        view: () => mod.renderVersionView({}, buildViewCtx({
+          state: planStore.state, sched,
+          today: new Date(2026, 8, 21), workday: createWorkday({}), holidays: []
+        }))
+      };
+    });
+  }
+
+  it('不超过一页时不出分页条', async () => {
+    const t = await makeView();
+    t.setVersionPage(1);
+    t.sched.createVersion({ name: 'V1', date: '2026-10-01' });
+    t.sched.createVersion({ name: 'V2', date: '2026-11-01' });
+    expect(t.view()).not.toContain('ver-pager');
+  });
+
+  it('超过一页：按上线日倒序分页，首页放最新的那些', async () => {
+    const t = await makeView();
+    const v = {};
+    for (let i = 7; i >= 1; i--) v[i] = t.sched.createVersion({ name: 'V' + i, date: `2026-${String(i).padStart(2, '0')}-10` }).version;
+
+    t.setVersionPage(1);
+    const p1 = t.view();
+    expect(p1).toContain('ver-pager');
+    expect(p1).toContain('第 1 / 2 页');
+    expect(p1).toContain(`data-ver-id="${v[7].id}"`);    // 最新的一版在最前
+    expect(p1).toContain(`data-ver-id="${v[2].id}"`);
+    expect(p1).not.toContain(`data-ver-id="${v[1].id}"`); // 最旧的那版被挤到第二页
+    expect(p1).toContain('data-ver-page="0" disabled');   // 首页的「上一页」不可点
+
+    t.setVersionPage(2);
+    const p2 = t.view();
+    expect(p2).toContain('第 2 / 2 页');
+    expect(p2).toContain(`data-ver-id="${v[1].id}"`);
+    expect(p2).toContain('data-ver-page="3" disabled');   // 末页的「下一页」不可点
+    t.setVersionPage(1);
+  });
+
+  it('页码越界时钳到最后一页（删掉版本后不会停在空页上）', async () => {
+    const t = await makeView();
+    for (let i = 7; i >= 1; i--) t.sched.createVersion({ name: 'V' + i, date: `2026-${String(i).padStart(2, '0')}-10` });
+    t.setVersionPage(9);
+    const html = t.view();
+    expect(t.getVersionPage()).toBe(2);
+    expect(html).toContain('第 2 / 2 页');
+    t.setVersionPage(1);
+  });
+
+  it('新建版本后翻到它所在的那一页（否则"保存完看不见刚建的那版"）', async () => {
+    const t = await makeView();
+    // 8 个版本占满第一页（每页 6 个），新建的那版上线日最早 → 必然落在第 2 页
+    for (let i = 8; i >= 1; i--) t.sched.createVersion({ name: 'V' + i, date: `2026-${String(i).padStart(2, '0')}-10` });
+    t.setVersionPage(1);
+
+    let saveFn = null;
+    const els = {
+      inpVerName: { value: 'V新' },
+      inpVerDate: { value: '2026-01-01' },
+      verPicker: { querySelectorAll: () => [] },
+      verActualRow: { hidden: true },
+      inpVerActual: { value: '' },
+      btnSaveVer: { addEventListener: (type, fn) => { saveFn = fn; } },
+      btnCancelVer: { addEventListener: () => {} }
+    };
+    const { bindVersionPage } = await import('../src/components/version-page.js');
+    bindVersionPage({
+      doc: {}, getEl: id => els[id] || null,
+      gantt: { addEventListener: () => {} },
+      planStore, sched: t.sched,
+      toast: () => {}, today: () => new Date(2026, 8, 21), render: () => {}
+    });
+    saveFn();   // 相当于点了弹窗里的「保存」
+
+    const nv = planStore.state.versions.find(x => x.name === 'V新');
+    expect(nv).toBeTruthy();
+    expect(t.getVersionPage()).toBe(t.versionPageOf(planStore.state, nv.id));
+    expect(t.getVersionPage()).toBe(2);   // 9 个版本 / 每页 6 → 第 2 页
+    t.setVersionPage(1);                  // 复位，别把页码留给后面的用例
+  });
+
+  it('分页按钮走委托翻页，只读下也能翻（纯查看动作）', async () => {
+    // 与上面的 makeEnv 同套路：捕获 click 处理器，用假 event.target 驱动
+    const calls = [];
+    const handlers = {};
+    const { bindVersionPage } = await import('../src/components/version-page.js');
+    const { setVersionPage, getVersionPage } = await import('../src/views/version-view.js');
+    bindVersionPage({
+      doc: {}, getEl: () => null,
+      gantt: { addEventListener: (type, fn) => { handlers[type] = fn; } },
+      planStore,
+      sched: {},
+      toast: m => calls.push(['toast', m]),
+      today: () => new Date(2026, 8, 21),
+      render: () => calls.push(['render'])
+    });
+    userStore.set({ readonly: true });
+    setVersionPage(1);
+    handlers.click({ target: { closest: sel => (sel.indexOf('[data-ver-page]') >= 0 ? { dataset: { verPage: '2' } } : null) } });
+    expect(getVersionPage()).toBe(2);
+    expect(calls).toContainEqual(['render']);
+    setVersionPage(1);
   });
 });

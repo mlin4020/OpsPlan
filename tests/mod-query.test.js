@@ -1,5 +1,5 @@
 // 需求台账的筛选与排序：纯函数，不依赖 DOM
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'vitest';
 import { F } from '../src/core/dates.js';
 import { filterMods, sortMods, collectProposers, defaultReqFilter, loadReqView, saveReqView } from '../src/core/mod-query.js';
 
@@ -233,16 +233,19 @@ describe('mod-query: 关注度排序（focus）', () => {
   const bar = o => ({ id: o.id || 'b', p: o.p || 'dev', res: ['张三'], done: 0, ...o });
   const focusOrder = mods => names(sortMods(mods, 'focus', 'asc', deps));
 
-  it('分层顺序：已逾期 → 待排期 → 待启动 → 已完成 → 已归档', () => {
+  it('分层顺序：进行中（含逾期）最上 → 待排期 → 待启动 → 已完成 → 已归档', () => {
     const mods = [
       { name: '已完成', pri: 'P0', bars: [bar({ s: '2026-08-01', e: '2026-08-05', done: 100 })] },
       // 已归档即使逾期也要沉到最底：它已退出活跃跟踪
       { name: '已归档', pri: 'P0', archived: true, bars: [bar({ s: '2026-07-01', e: '2026-07-05' })] },
       { name: '已逾期', pri: 'P3', bars: [bar({ s: '2026-08-01', e: '2026-08-10' })] },
+      // 进行中且不落后、不临近：开工了几个月、完成度已超过应达，落「正常推进」档。
+      // 它必须排在待排期之前 —— 待排期只是一堆还没排期的需求，不该插到正在推进的前面
+      { name: '进行中', pri: 'P3', bars: [bar({ s: '2026-08-19', e: '2026-09-30', done: 50 })] },
       { name: '待启动', pri: 'P0', bars: [bar({ s: '2026-10-01', e: '2026-10-05' })] },
       { name: '待排期', pri: 'P0', unscheduled: true, bars: [bar({ s: '2026-10-01', e: '2026-10-05' })] }
     ];
-    expect(focusOrder(mods)).toEqual(['已逾期', '待排期', '待启动', '已完成', '已归档']);
+    expect(focusOrder(mods)).toEqual(['已逾期', '进行中', '待排期', '待启动', '已完成', '已归档']);
   });
 
   it('分层永远压过优先级（P3 已逾期 仍在 P0 已归档 之前）', () => {
@@ -272,9 +275,56 @@ describe('mod-query: 关注度排序（focus）', () => {
   });
 });
 
+describe('mod-query: 进行中优先排序（group，台账默认）', () => {
+  const bar = o => ({ id: o.id || 'b', p: o.p || 'dev', res: ['张三'], done: 0, ...o });
+  const groupOrder = mods => names(sortMods(mods, 'group', 'asc', deps));
+
+  it('先分档，档内保持甘特图顺序（不按优先级 / 计划结束日重排）', () => {
+    // 数组顺序（= 甘特图顺序）刻意与优先级、计划结束日都相反：
+    // 一旦 group 偷偷引入了二级键，下面的断言会立刻翻过来
+    const mods = [
+      { name: '已完成', pri: 'P0', bars: [bar({ s: '2026-08-01', e: '2026-08-05', done: 100 })] },
+      { name: '进行中-先', pri: 'P3', bars: [bar({ s: '2026-08-19', e: '2026-09-30', done: 50 })] },
+      { name: '已归档', pri: 'P0', archived: true, bars: [bar({ s: '2026-07-01', e: '2026-07-05' })] },
+      { name: '进行中-后', pri: 'P0', bars: [bar({ s: '2026-08-19', e: '2026-09-29', done: 50 })] }
+    ];
+    expect(groupOrder(mods)).toEqual(['进行中-先', '进行中-后', '已完成', '已归档']);
+  });
+
+  it('逾期不再单独提前：与其它"进行中"同档，档内按甘特图顺序', () => {
+    const mods = [
+      { name: '正常推进', pri: 'P0', bars: [bar({ id: 'a', s: '2026-08-19', e: '2026-09-30', done: 50 })] },
+      { name: '已逾期', pri: 'P0', bars: [bar({ id: 'b', s: '2026-08-01', e: '2026-08-10' })] }
+    ];
+    // 逾期的没有因为"紧急"被拔到最前 —— 档内认甘特图顺序
+    expect(groupOrder(mods)).toEqual(['正常推进', '已逾期']);
+    // 对照：关注度排序仍按紧急度把它顶到最前（那正是那个排序的用途）
+    expect(names(sortMods(mods, 'focus', 'asc', deps))).toEqual(['已逾期', '正常推进']);
+  });
+
+  it('进行中排最上，待排期 / 待启动 / 已完成 / 已归档 依次在后', () => {
+    const mods = [
+      { name: '已完成', pri: 'P0', bars: [bar({ id: 'a', s: '2026-08-01', e: '2026-08-05', done: 100 })] },
+      { name: '待启动', pri: 'P0', bars: [bar({ id: 'b', s: '2026-10-01', e: '2026-10-05' })] },
+      { name: '已归档', pri: 'P0', archived: true, bars: [bar({ id: 'c', s: '2026-07-01', e: '2026-07-05' })] },
+      { name: '待排期', pri: 'P0', unscheduled: true, bars: [bar({ id: 'd', s: '2026-10-01', e: '2026-10-05' })] },
+      { name: '进行中', pri: 'P0', bars: [bar({ id: 'e', s: '2026-08-19', e: '2026-09-30', done: 50 })] }
+    ];
+    expect(groupOrder(mods)).toEqual(['进行中', '待排期', '待启动', '已完成', '已归档']);
+  });
+});
+
 describe('mod-query: 查询条件持久化', () => {
-  // node 环境没有 localStorage，用内存版打桩（与 scheduler.test.js 同一套做法）
+  // node 环境没有 localStorage，用内存版打桩。
+  // ⚠️ 必须在 afterEach 还原：localStorage 是全局对象，直接覆盖会污染同进程的
+  // 其他测试文件（vitest 按 worker 复用进程），表现为"某个测试单独跑通过、
+  // 全量跑失败"这种难查的抖动。
   const store = new Map();
+  const originalLS = globalThis.localStorage;
+  const restore = () => {
+    if (originalLS === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalLS;
+  };
   beforeEach(() => {
     store.clear();
     globalThis.localStorage = {
@@ -283,11 +333,13 @@ describe('mod-query: 查询条件持久化', () => {
       removeItem: k => store.delete(k)
     };
   });
+  afterEach(restore);
+  afterAll(restore);
 
-  it('没存过时返回默认值（默认按关注度排）', () => {
+  it('没存过时返回默认值（默认「进行中优先」）', () => {
     const v = loadReqView('p1');
     expect(v.filter.scope).toBe('all');
-    expect(v.sort.key).toBe('focus');
+    expect(v.sort.key).toBe('group');
   });
 
   it('存了能还原，且不同项目互不干扰', () => {
@@ -309,7 +361,40 @@ describe('mod-query: 查询条件持久化', () => {
   });
 
   it('快照损坏时回退默认值，不抛错', () => {
-    store.set('opsplan.reqView.v1:p1', '{ 这不是 json');
+    store.set('opsplan.reqView.v2:p1', '{ 这不是 json');
+    expect(loadReqView('p1').sort.key).toBe('group');
+  });
+
+  // ---- 默认排序换成 group 之后的迁移 ----
+  // 老快照里的 order / focus 分不清是"当初的默认值"还是"用户主动选的"
+  // （只改筛选也会把当时的默认排序一起落盘），一律按新默认处理；
+  // 其余排序键与筛选条件照常迁移（不让用户重设一遍）。
+
+  it('v1 老快照的旧默认排序（focus）不沿用，回到新默认 group', () => {
+    store.set('opsplan.reqView.v1:p1', JSON.stringify({ filter: { scope: 'active' }, sort: { key: 'focus', dir: 'asc' } }));
+    const v = loadReqView('p1');
+    expect(v.sort.key).toBe('group');
+    expect(v.filter.scope).toBe('active');   // 筛选条件照常迁移
+  });
+
+  it('v1 老快照里用户主动选的其它排序键照常还原', () => {
+    store.set('opsplan.reqView.v1:p1', JSON.stringify({ filter: {}, sort: { key: 'pri', dir: 'desc' } }));
+    expect(loadReqView('p1').sort).toEqual({ key: 'pri', dir: 'desc' });
+  });
+
+  it('v2 老快照里的 order（更早那版的默认）同样回到新默认 group', () => {
+    // 踩过的坑：默认从 order 换成 focus 时没做这一步，快照里的 order 被当成
+    // 主动选择迁了过来，用户打开台账看到的还是"甘特图顺序"，以为没改
+    store.set('opsplan.reqView.v2:p1', JSON.stringify({ filter: { kw: '看板' }, sort: { key: 'order', dir: 'asc' } }));
+    const v = loadReqView('p1');
+    expect(v.sort.key).toBe('group');
+    expect(v.filter.kw).toBe('看板');   // 筛选条件照常迁移
+  });
+
+  it('当前版快照里主动选的 focus / order 照常还原（迁移只在读旧版时发生）', () => {
+    saveReqView('p1', defaultReqFilter(), { key: 'focus', dir: 'asc' });
     expect(loadReqView('p1').sort.key).toBe('focus');
+    saveReqView('p1', defaultReqFilter(), { key: 'order', dir: 'asc' });
+    expect(loadReqView('p1').sort.key).toBe('order');
   });
 });

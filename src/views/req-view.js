@@ -16,8 +16,8 @@
 import { F, fmtD } from '../core/dates.js';
 import { PCOL, PNAME, MODULE_LIFECYCLE, LIFECYCLE_NONE } from '../core/default-data.js';
 import { moduleTag, currentPhase, computeModulePer, progressDeviation, findGateMs } from '../core/mod-tag.js';
-import { versionOfMod, versionStatus, modLate, findGoMs } from '../core/versions.js';
-import { filterMods, sortMods, collectProposers } from '../core/mod-query.js';
+import { versionOfMod, versionStatus, findGoMs, sortVersions, versionOptionLabel } from '../core/versions.js';
+import { filterMods, sortMods, collectProposers, modGroupTier } from '../core/mod-query.js';
 import { modStats, renderModDetailRows } from './mod-card.js';
 import { priorityBadge, lifecycleBadge, LC_CLASS } from './badge.js';
 
@@ -35,12 +35,15 @@ const esc = s => String(s == null ? '' : s)
 
 // 上线情况：**不新增字段**，全部由版本数据合成（设计文档 §5）
 //
+// 呈现位置：只在展开档案的「上线情况」段。主行曾单列一列，已去掉 ——
+// 它读的是版本口径（不是需求自身的进度），与「状态」列同屏时反而互相干扰（见下），
+// 而它属于"细读才用得上"的信息：点开档案看更清楚，也省下一列宽度。
+//
 // 口径边界：无版本的需求 versionStatus 会返回「未开始」，对读者是误导 ——
-// 故这里先判版本存在性，无版本一律显示「未加入版本」，且不给「赶不上」预警
-// （modLate 本身也只在有版本时才有效）。
-// 台账「上线情况」列的措辞只讲上线维度，不复述需求状态。
+// 故这里先判版本存在性，无版本一律显示「未加入版本」。
+// 措辞只讲上线维度，不复述需求状态。
 // 原因：versionStatus 用的是版本口径，其中「进行中」（版本有成员已开工）和
-// 「已逾期」（版本过了上线日没发）会与左边「状态」列的 moduleTag 撞词 ——
+// 「已逾期」（版本过了上线日没发）会与「状态」列的 moduleTag 撞词 ——
 // 同一行出现两个「进行中」、两个「已逾期」，且含义并不相同，读者要费劲分辨。
 // 版本页保留 versionStatus 原文案：那里讲的就是版本本身，语境自洽。
 const SHIP_TEXT = {
@@ -58,19 +61,16 @@ export function shipInfo(mo, ctx) {
   const planFromMs = go && go.m ? go.m : null;
 
   if (mo.unscheduled) {
-    return { text: '待排期', color: '#94a3b8', plan: null, actual: null, late: null };
+    return { text: '待排期', color: '#94a3b8', plan: null, actual: null };
   }
   if (!v) {
-    return { text: '未加入版本', color: '#94a3b8', plan: planFromMs, actual: null, late: null };
+    return { text: '未加入版本', color: '#94a3b8', plan: planFromMs, actual: null };
   }
   const st = versionStatus(v, state, today);
   return {
     text: SHIP_TEXT[st.key] || st.text, color: st.color,
     plan: v.date || planFromMs,
-    actual: v.shipped ? v.shippedAt : null,
-    // 已上线的版本不再有"赶不上"风险 —— 都已经发布完了，再报风险只会误导读者
-    // （modLate 只看"最晚完成日是否晚于版本日"，不看版本是否已发货）
-    late: v.shipped ? null : modLate(v, mo)
+    actual: v.shipped ? v.shippedAt : null
   };
 }
 
@@ -112,6 +112,30 @@ function lifecycleSelect(name, cur) {
     + ` title="直接改生命周期（人工维护，与左侧自动计算的「状态」不是一回事）">${opts}</select>`;
 }
 
+// 所属版本行内编辑：把「编辑版本 → 取消勾选 → 再去另一个版本勾选」压成一次选择。
+//
+// 选项 = 「未加入版本」+ 全部版本（按上线日升序，与版本页顺序一致，
+// 文案由 core/versions.js 的 versionOptionLabel 统一给出）。
+// 提交不走 updateModule：需求侧不存版本字段，改归属动的是版本侧的成员名单，
+// 由 components/req-page.js 转发给 sched.setModuleVersion（见 core/versions.js 的口径说明）。
+//
+// 一个版本都没有时不给下拉：选项只有「未加入版本」，摆在那里只会让人以为能选。
+function versionCell(state, name, ver) {
+  const view = `<span class="req-inline-view">${ver
+    ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>`
+    : '<span class="req-muted">未加入版本</span>'}</span>`;
+  const versions = (state && state.versions) || [];
+  if (!versions.length) return view;
+  const cur = ver ? ver.id : '';
+  const opts = `<option value=""${cur === '' ? ' selected' : ''}>未加入版本</option>`
+    + sortVersions(versions).map(v => `<option value="${esc(v.id)}"${v.id === cur ? ' selected' : ''}`
+      + `>${esc(versionOptionLabel(v))}</option>`).join('');
+  return view
+    + `<span class="req-inline-edit"><select class="req-inline req-inline-ver"`
+    + ` data-req-inline="version" data-name="${esc(name)}" data-prev="${esc(cur)}"`
+    + ` title="直接调整所属版本（切到别的版本会自动从原版本移出，并跟随新版本的上线日）">${opts}</select></span>`;
+}
+
 // 操作列图标：内联 SVG 而不是 emoji / Unicode 符号。
 // emoji（如 🗄）在不同系统会渲成彩色字形且大小不一；✎ ✕ 这类符号在不同字体下
 // 粗细也对不齐。SVG 用 stroke=currentColor 跟随文字色，hover 与 danger 变色时自动同步。
@@ -124,7 +148,11 @@ const ICON = {
 
 // 关键时间：需求确认 / 提测两个卡点的日期（不新增字段，实时读排期里程碑）
 // 口径见 core/mod-tag.js 的 findGateMs：提测只能按 label 认，不能判 p='sit'
+//
+// 待排期需求一律留空：它的排期还没定下来，这两个卡点（若存在）是自动阶段占位算出来的，
+// 摆在表里会被当成"已确定的时间"读——那是误导，宁可空着。
 function gateCell(mo) {
+  if (mo.unscheduled) return '<span class="req-muted">—</span>';
   const cfm = findGateMs(mo, 'confirm');
   const tice = findGateMs(mo, 'submit');
   if (!cfm && !tice) return '<span class="req-muted">—</span>';
@@ -132,39 +160,52 @@ function gateCell(mo) {
   return [cfm ? chip(cfm, '确认') : '', tice ? chip(tice, '提测') : ''].filter(Boolean).join('');
 }
 
-function shipCell(ship) {
-  const parts = [`<span class="tag" style="background:${ship.color}">${ship.text}</span>`];
-  // plan / actual 是 "YYYY-MM-DD" 字符串 → 需要 F() 转 Date
-  if (ship.plan) parts.push(`<span class="req-sub">计划 ${fmtD(F(ship.plan))}</span>`);
-  if (ship.actual) parts.push(`<span class="req-sub">实际 ${fmtD(F(ship.actual))}</span>`);
-  // ⚠️ ship.late.end 则**已经是 Date**（core/versions.js 的 modLatestEnd 返回 Date），
-  // 不能再包 F()：F 按 "YYYY-MM-DD" 切字符串，传 Date 会得到 Invalid Date → 渲染成 "NaN/NaN"
-  if (ship.late) parts.push(`<span class="req-late" title="按当前排期算，最晚 ${fmtD(ship.late.end)} 才完成">赶不上 · 晚 ${ship.late.days} 天</span>`);
-  return parts.join(' ');
-}
-
-function rowHtml(mo, ctx) {
-  const { today } = ctx;
-  const { tag, tagc } = moduleTag(mo, today);
-  const ship = shipInfo(mo, ctx);
-  const ver = versionOfMod(ctx.state, mo.name);
-  const rng = mo.unscheduled ? null : ctx.modRange(mo);
+// 排期与进度列。
+//
+// 待排期需求只留「待排期」三个字，不显示排期区间、进度条与偏差：
+//   · 排期区间为空本来就没得显示；
+//   · 进度（EV / PV）是**建在排期之上**的派生量 —— 日期都还没定，算出来的 0% 与「延后 30%」
+//     只会被读成"没开工 / 落后了"，而事实是"还没排期，现在不该看进度"。
+// 顺带省掉这类行的 modStats 计算（台账一次要渲染全部需求）。
+//
+// 其余需求的偏差口径：与总览卡片 / 排期总览同口径（EV − PV），判定集中在
+// core/mod-tag.js 的 progressDeviation（含"已完成不报偏差"这条，三处必须一致）。
+// 两类需求不参与健康度评判：
+//   · 待排期：没有排期区间，日期本身不可信，无从判偏差（见上，直接不渲染）
+//   · 已归档：留档查阅用，「延后 40%」这种行动导向的提醒对它已无意义。
+//     但进度条不能留着红——红了却不写原因只会更困惑，故转中性色。
+//     已完成的需求例外，仍走绿：100% 是既成事实，与是否归档无关。
+function planCell(mo, ctx) {
+  if (mo.unscheduled) return '<span class="req-muted">待排期</span>';
+  const rng = ctx.modRange(mo);
   const st = modStats(mo.bars, ctx);
-  // 偏差与总览卡片 / 排期总览同口径（EV − PV），判定集中在 core/mod-tag.js 的 progressDeviation
-  // （含"已完成不报偏差"这条，三处必须一致）。
-  // 两类需求不参与健康度评判：
-  //   · 待排期：没有排期区间（rng 为空），日期本身不可信，无从判偏差
-  //   · 已归档：留档查阅用，「延后 40%」这种行动导向的提醒对它已无意义。
-  //     但进度条不能留着红——红了却不写原因只会更困惑，故转中性色。
-  //     已完成的需求例外，仍走绿：100% 是既成事实，与是否归档无关。
   const dev = progressDeviation(mo.bars, st);
   const archQuiet = !!mo.archived && !dev.finished;
   const stCls = !rng ? '' : (archQuiet ? 'archived' : dev.key);
   const deviTxt = (rng && !mo.archived) ? dev.label : '';
-  const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
+  return `<span class="req-sub">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : '—'}</span>
+      <span class="req-c-pct">
+        <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
+        <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
+        ${deviTxt ? `<span class="req-devi ${stCls}" title="实际完成度 ${st.pct.toFixed(1)}% − 计划应达 ${st.planPct.toFixed(1)}%（PV 按各任务的计划窗口算）">${deviTxt}</span>` : ''}
+      </span>`;
+}
 
-  return `<tr class="req-row" data-req-row="${esc(mo.name)}">
-    <td class="req-c-name">${priorityBadge(mo.pri)}<b>${esc(mo.name)}</b>${archFlag}</td>
+function rowHtml(mo, ctx, deps, dragOn) {
+  const { today } = ctx;
+  const { tag, tagc } = moduleTag(mo, today);
+  const ver = versionOfMod(ctx.state, mo.name);
+  const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
+  // 拖拽手柄与分组档位只在「进行中优先」排序下输出（dragOn）：
+  // 其余排序的档内先后由排序键决定（优先级 / 日期…），拖完会被重排回去，
+  // 与其让用户白拖一次，不如干脆不给手柄（判定见 components/req-page.js 的拖拽委托）。
+  const dragAttr = dragOn ? ` draggable="true" data-req-drag="${esc(mo.name)}"` : '';
+  // ⚠️ 档位必须用排序同源的 modGroupTier：逾期与"进行中"在视觉上同组，
+  //    若这里写细分档，两者档位不同 → 明明同组却拖不动
+  const tierAttr = dragOn ? ` data-req-tier="${modGroupTier(mo, deps)}"` : '';
+
+  return `<tr class="req-row" data-req-row="${esc(mo.name)}"${tierAttr}>
+    <td class="req-c-name"${dragAttr}>${priorityBadge(mo.pri)}<b>${esc(mo.name)}</b>${archFlag}</td>
     <td class="req-col-opt">${proposedCell(mo)}</td>
     <td><span class="tag" style="background:${tagc}">${tag}</span></td>
     <td class="req-c-lc">
@@ -172,17 +213,9 @@ function rowHtml(mo, ctx) {
       <span class="req-inline-edit">${lifecycleSelect(mo.name, mo.lifecycle)}</span>
     </td>
     <td class="req-col-opt">${docCell(mo)}</td>
-    <td>${ver ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>` : '<span class="req-muted">未加入版本</span>'}</td>
-    <td class="req-c-plan">
-      <span class="req-sub">${rng ? `${fmtD(rng.start)}~${fmtD(rng.end)}` : (mo.unscheduled ? '待排期' : '—')}</span>
-      <span class="req-c-pct">
-        <span class="req-pbar"><i class="${stCls}" style="width:${Math.min(100, st.pct)}%"></i></span>
-        <span class="req-sub">${st.pct.toFixed(0)}% · ${st.done.toFixed(1)}/${st.work} 人日</span>
-        ${deviTxt ? `<span class="req-devi ${stCls}" title="实际完成度 ${st.pct.toFixed(1)}% − 计划应达 ${st.planPct.toFixed(1)}%（PV 按各任务的计划窗口算）">${deviTxt}</span>` : ''}
-      </span>
-    </td>
+    <td class="req-c-ver">${versionCell(ctx.state, mo.name, ver)}</td>
+    <td class="req-c-plan">${planCell(mo, ctx)}</td>
     <td class="req-c-gate">${gateCell(mo)}</td>
-    <td class="req-c-ship">${shipCell(ship)}</td>
     <td class="req-ops req-act">
       <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">${ICON.edit}</button>
       <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? ICON.restore : ICON.archive}</button>
@@ -193,9 +226,12 @@ function rowHtml(mo, ctx) {
 
 // 排序方式下拉的选项：值编码成 "key:dir"，与 viewState.reqSort 一一对应。
 // 为什么要这个下拉：排序原先只能点表头，而表头没有任何"可点"的暗示，
-// 用户基本发现不了；再加上首列现在默认按「关注度」排（不对应任何单一列），
+// 用户基本发现不了；再加上首列现在默认按「进行中优先」排（不对应任何单一列），
 // 光靠表头点击也无法表达这个状态。
 const SORT_OPTIONS = [
+  // group 内部叫「进行中优先」（分档 + 档内甘特图顺序），下拉里只写「默认排序」：
+  // 看台账的人不需要知道排序算法，只需要认出"这就是打开时那档"
+  ['group:asc', '默认排序'],
   ['focus:asc', '关注度排序'],
   ['pri:asc', '优先级（高在前）'],
   ['end:asc', '计划结束日（近在前）'],
@@ -204,6 +240,8 @@ const SORT_OPTIONS = [
   ['pct:asc', '完成度（低在前）'],
   ['pct:desc', '完成度（高在前）'],
   ['lifecycle:asc', '生命周期（流程先后）'],
+  // 计划上线日：主行已不单列这一项（收进展开档案），但排序照旧有意义 ——
+  // "哪条最先上线"是排期会上的常用问法，展开档案里能看到具体日期
   ['ship:asc', '计划上线日（近在前）'],
   ['proposed:desc', '提出时间（近在前）'],
   ['name:asc', '需求名'],
@@ -300,11 +338,10 @@ function detailHtml(mo, ctx) {
         <h5>上线情况</h5>
         <div class="req-kv">
           <span><i>状态</i><b style="color:${ship.color}">${ship.text}</b></span>
-          <span><i>所属版本</i><b>${ver ? esc(ver.name) : '未加入版本'}</b></span>
+          <span><i>所属版本</i><b>${versionCell(ctx.state, mo.name, ver)}</b></span>
           <span><i>计划上线</i><b>${ship.plan ? fmtD(F(ship.plan)) : '—'}</b></span>
           <span><i>实际上线</i><b>${ship.actual ? fmtD(F(ship.actual)) : '—'}</b></span>
         </div>
-        ${ship.late ? `<p class="req-late-note">按当前排期算，最晚 ${fmtD(ship.late.end)} 才能完成，比版本上线日晚 ${ship.late.days} 天。</p>` : ''}
       </div>
       <div class="req-detail-sec" data-req-sec="progress">
         <h5>排期与进度</h5>
@@ -336,6 +373,8 @@ export function renderReqView(container, ctx) {
   const deps = { today, versions: state.versions || [], modRange: ctx.modRange, ctx };
   const hit = sortMods(filterMods(all, filter, deps), sort.key, sort.dir, deps);
   const versions = state.versions || [];
+  // 拖拽排序只在默认的「进行中优先」下渲染手柄：那个排序的档内就是甘特图顺序，拖动才改得动
+  const dragOn = sort.key === 'group' && sort.dir === 'asc';
 
   const head = `<div class="report-sec">
     <div class="report-head">需求台账<span>全部需求清单（含待排期与已归档）· 点任意一行展开需求档案</span></div>
@@ -358,7 +397,7 @@ export function renderReqView(container, ctx) {
   };
 
   // 展开档案紧跟在被点开的那一行之后（同一 tbody 内的 detail 行）
-  const rows = hit.map(mo => rowHtml(mo, ctx) + (reqExpanded.has(mo.name) ? detailHtml(mo, ctx) : '')).join('');
+  const rows = hit.map(mo => rowHtml(mo, ctx, deps, dragOn) + (reqExpanded.has(mo.name) ? detailHtml(mo, ctx) : '')).join('');
 
   return `<div class="report-wrap req-wrap">
     ${head}
@@ -367,14 +406,13 @@ export function renderReqView(container, ctx) {
         <table class="req-table">
           <thead><tr>
             ${th('name', '需求')}
-            ${th('proposed', '提出', 'req-col-opt', '提出人 / 提出时间；窄屏隐藏该列（背景信息，不是对比指标）')}
+            ${th('proposed', '提出人', 'req-col-opt', '提出人 / 提出时间；窄屏隐藏该列（背景信息，不是对比指标）')}
             ${th('status', '状态')}
             ${th('lifecycle', '生命周期', '', '人工维护的流程门，与左侧自动计算的「状态」不是同一件事')}
             <th class="req-col-opt" title="有需求文档链接时显示可点入口；无则「—」">文档</th>
             ${th('version', '所属版本')}
-            ${th('start', '排期与进度', '', '排期区间 + 完成度（含与计划的偏差）；点击按排期起点排序')}
-            ${th('confirm', '关键时间', '', '需求确认 / 提测两个卡点的排期日期；点击按需求确认时间排序，缺里程碑的排最后')}
-            ${th('ship', '上线情况')}
+            ${th('start', '排期与进度', '', '排期区间 + 完成度（含与计划的偏差）；待排期需求为空；点击按排期起点排序')}
+            ${th('confirm', '关键时间', '', '需求确认 / 提测两个卡点的排期日期；待排期需求为空；点击按需求确认时间排序，缺里程碑的排最后')}
             <th class="req-act">操作</th>
           </tr></thead>
           <tbody>${rows}</tbody>

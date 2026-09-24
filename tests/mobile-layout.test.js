@@ -147,10 +147,13 @@ describe('移动端：抽屉可关闭', () => {
     expect(phone).toMatch(/\.drawer\.task-drawer \.drawer-foot \.btn,\.drawer\.form-drawer \.drawer-foot \.btn\{flex:1 1 0/);
   });
 
-  it('需求抽屉里有优先级控件（无 / P0~P3 五档），且徽标样式齐全', () => {
-    expect(html).toContain('id="segModPri"');
-    // 「无」是合法状态：老数据没有 pri，编辑时必须能原样保留「未设置」
-    ['', 'P0', 'P1', 'P2', 'P3'].forEach(p => expect(html).toContain(`data-pri="${p}"`));
+  it('需求抽屉里有优先级控件（未设置 / P0~P3 五档），且徽标样式齐全', () => {
+    // 下拉而不是一排分段按钮：小抽屉里 5~6 个按钮平铺要占掉一整行（生命周期还得折两行）
+    expect(html).toContain('id="selModPri"');
+    expect(html).not.toContain('id="segModPri"');
+    // 「未设置」是合法值：老数据没有 pri，编辑时必须能原样保留
+    expect(html).toContain('<option value="">未设置</option>');
+    ['P0', 'P1', 'P2', 'P3'].forEach(p => expect(html).toContain(`<option value="${p}">`));
     ['p0', 'p1', 'p2', 'p3'].forEach(k => {
       expect(css).toContain(`.pri-${k}{`);
     });
@@ -542,9 +545,30 @@ describe('需求台账：提出信息与生命周期字段贯通', () => {
   it('抽屉里有提出人 / 提出时间 / 生命周期三个控件与候选容器', () => {
     expect(shell).toContain('id="newModProposedBy"');
     expect(shell).toContain('id="newModProposedAt"');
-    expect(shell).toContain('id="segModLc"');
+    expect(shell).toContain('id="selModLc"');       // 生命周期：下拉（原为分段按钮）
+    expect(shell).not.toContain('id="segModLc"');
     expect(shell).toContain('id="modProposerList"');
-    expect(shell).toContain('data-lc=""');          // 「未设置」档必须在
+    // 「未设置」档必须在：老数据没有 lifecycle，编辑时要能原样保留
+    expect(shell).toMatch(/id="selModLc"[\s\S]*?<option value="">未设置<\/option>/);
+    // 提出时间整块可点：靠 .date-field 容器 + JS 代理 showPicker（原生只有图标那一点能点）
+    expect(shell).toMatch(/class="date-field"[\s\S]*?id="newModProposedAt"/);
+  });
+
+  // 提出时间"点击没反应"的回归钉。踩过一次：点击委托挂在外层容器上，却写了
+  // "目标不是输入框才处理"的守卫 —— 而输入框铺满容器，于是所有点击都被放过；
+  // 同时原生日历图标又被透明化，整块既没反应也没了可点的暗示。
+  it('提出时间整块可点：点击绑在输入框自身，且不经手 pointer-events', () => {
+    expect(modals).toMatch(/dateField\.addEventListener\('click'/);   // 绑在输入框（唯一热区）
+    expect(modals).toMatch(/dateField\.showPicker\(\)/);
+    expect(modals).toMatch(/dateField\.focus\(\)/);                   // 无 showPicker 时的降级
+    // 不能再出现"点在输入框上就放过"的守卫：输入框铺满容器，那条件 = 全部放过
+    expect(modals).not.toMatch(/e\.target === dateField/);
+    // 输入框必须保持可交互（关掉 pointer-events 会顺带废掉焦点与键盘输入）
+    const dateInput = css.match(/\.date-field input\[type=date\]\{([^}]*)\}/);
+    expect(dateInput).not.toBeNull();
+    expect(dateInput[1]).not.toContain('pointer-events:none');
+    // 自绘图标不拦截，点击落到输入框上
+    expect(css).toMatch(/\.df-ic\{[^}]*pointer-events:none/);
   });
 
   it('打开时回显：新建默认「待分析」+ 当天，编辑回显原值', () => {

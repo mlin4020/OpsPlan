@@ -88,6 +88,8 @@ export function bindAll(rawDeps) {
   const afterRender = () => {
     drawers.bindGanttInteractions();
     toolbar.updateUndoRedoBtns();  // 刷新撤销/重做按钮状态
+    // 新建需求后把那一行滚进视野（标记由 modals 写入，消费一次即清）
+    if (reqPage && reqPage.focusPending) reqPage.focusPending();
   };
 
   // ---- 5. render ctx 注入回调（供 renderAll / main-gantt 使用） ----
