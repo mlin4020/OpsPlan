@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0e7490">
+<title>登录 · OpsPlan</title>
+<!-- 后端配置：feishu-config.js 中 enabled:true 时走飞书，否则走 Supabase -->
+<script src="feishu-config.js" onerror="void 0"></script>
+<!-- Supabase 客户端（UMD）与连接配置；缺失时提交会给出「未配置」提示 -->
+<script src="lib/supabase.js" onerror="void 0"></script>
+<script src="supabase-config.js" onerror="void 0"></script>
+</head>
+<body>
+
+<!-- 登录页独立成一个路由（原先与项目列表挤在 index.html 里，用 display 切换两个视图）：
+     ① 未登录的人第一眼看到的就是登录，不会被项目列表分心，也不必先加载列表再被拦下；
+     ② 项目列表页只剩"列表"一件事，不必同时维护两套视图状态。
+     样式在 src/styles/login.css，逻辑在 src/main-login.js。 -->
+<div id="viewLogin">
+  <div class="login-card">
+    <h1>OpsPlan</h1>
+    <div class="login-sub" id="loginSub">登录后进入项目列表</div>
+
+    <form id="loginForm" autocomplete="on">
+      <div class="field"><label>邮箱</label><input type="email" id="inpLoginEmail" placeholder="you@company.com" required></div>
+      <div class="field"><label>密码</label><input type="password" id="inpLoginPwd" placeholder="••••••••" required></div>
+      <button class="btn primary block" type="submit" id="btnLogin">登 录</button>
+      <div class="err" id="loginErr"></div>
+      <div class="hint">没有账号？<span class="toggle-link" id="linkToReg">注册</span></div>
+    </form>
+
+    <form id="regForm" autocomplete="on" style="display:none">
+      <div class="field"><label>姓名</label><input type="text" id="inpRegName" placeholder="张三"></div>
+      <div class="field"><label>邮箱</label><input type="email" id="inpRegEmail" required></div>
+      <div class="field"><label>密码</label><input type="password" id="inpRegPwd" minlength="6" required></div>
+      <button class="btn primary block" type="submit" id="btnReg">注 册</button>
+      <div class="err" id="regErr"></div>
+      <div class="hint">已有账号？<span class="toggle-link" id="linkToLogin">返回登录</span></div>
+    </form>
+
+    <!-- 游客入口：点一下直接进系统（只读）。
+         不是"假登录"—— 服务端 RLS 对 anon 只放行查询，写操作一律拒绝，
+         前端只是把这个事实呈现出来（隐藏一切写入口，见 main-index.js 的 enterGuestMode）。 -->
+    <div class="guest-box">
+      <div class="guest-or"><span>或</span></div>
+      <button class="btn guest" type="button" id="btnGuest">以游客身份进入（只读）</button>
+      <div class="guest-tip">不用登录即可浏览全部项目与排期，但不能修改任何数据。</div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/main-login.js"></script>
+</body>
+</html>

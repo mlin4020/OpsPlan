@@ -1,9 +1,15 @@
 // ============================================================
-// src/main-index.js — 登录 / 项目列表 / 管理面板页入口
-// 迁移 index.html 内联脚本（168-398 行）全部逻辑，改为 ES Module 形态。
-// 复用 services/auth + services/projects（替代 window.API），DOM 结构复用 index.html。
+// src/main-index.js — 项目列表 / 管理面板页入口（index.html）
+//
+// 登录已拆到独立路由 login.html（见 src/main-login.js），本页只做两件事：
+//   1) 进门先把关：没有登录态、也不是游客 → 直接跳登录页（用 replace，别让返回键来回弹）；
+//   2) 进来之后列项目：管理员还有用户管理面板。
+//
+// 游客（isGuest）是"免登录只读浏览"本机标记，写操作照样被服务端 RLS 拒掉，
+// 这里只收敛 UI（隐藏一切写入口 + 提供回登录页的入口）。
 // ============================================================
-import { getSession, getUser, getProfile, login, signUp, logout, friendlyAuthError, snapshotSession, restoreSession } from './services/auth.js';
+// signUp / friendlyAuthError 仍由本页用：管理员在「用户管理」里直接建号（见 saveNewUser）
+import { getSession, getUser, getProfile, logout, signUp, friendlyAuthError, snapshotSession, restoreSession, isGuest, leaveGuest } from './services/auth.js';
 import {
   listProjects, getProject, createProject, updateProject, deleteProject,
   listUsers, listUserOptions, setAdmin
@@ -31,9 +37,12 @@ const fmtTime = ts => {
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isAdmin = () => me && me.role === 'admin';
 
-// ---------- 视图切换 ----------
-function showLogin() { $('viewLogin').style.display = 'flex'; $('viewMain').style.display = 'none'; }
-function showMain() { $('viewLogin').style.display = 'none'; $('viewMain').style.display = 'block'; }
+// ---------- 视图切换 / 登录守卫 ----------
+function showMain() { $('viewMain').style.display = 'block'; }
+
+// 去登录页。用 replace 而不是 href：未登录被拦下时不该在历史里留下一条列表页记录，
+// 否则返回键会退回来又被拦一次（来回弹两下，看着像坏了）
+function goLogin() { location.replace('login.html'); }
 
 // ---------- 数据加载 ----------
 async function fetchMyProfile() {
@@ -96,28 +105,6 @@ async function loadUsers() {
   }));
 }
 
-// ---------- 认证操作 ----------
-async function doLogin(email, pwd) {
-  $('loginErr').textContent = '';
-  const { error } = await login(email, pwd);
-  if (error) { $('loginErr').textContent = friendlyAuthError(error); return; }
-  const p = await fetchMyProfile();
-  if (!p) { $('loginErr').textContent = '账号资料加载失败，请重试'; return; }
-  enterApp();
-}
-
-async function doReg(name, email, pwd) {
-  $('regErr').textContent = '';
-  const { data, error } = await signUp(name, email, pwd);
-  if (error) { $('regErr').textContent = friendlyAuthError(error); return; }
-  if (data.session) {
-    await fetchMyProfile();
-    enterApp();
-  } else {
-    $('regErr').textContent = '注册成功，请前往邮箱点击确认链接后登录';
-  }
-}
-
 function enterApp() {
   showMain();
   if (me) {
@@ -147,7 +134,7 @@ function enterGuestMode() {
   showGuestLoginBtn(true);
 }
 
-// hero 区的「登录」按钮：游客模式下动态插入，点击回到登录卡片
+// hero 区的「登录」按钮：游客模式下动态插入，点击前往登录页（换账号 / 结束只读浏览）
 function showGuestLoginBtn(on) {
   let btn = $('btnGuestLogin');
   if (!on) { if (btn) btn.remove(); return; }
@@ -157,7 +144,7 @@ function showGuestLoginBtn(on) {
   btn.className = 'btn ghost';
   btn.style.cssText = 'color:#9db4d6;border-color:#33455e';
   btn.textContent = '登录';
-  btn.addEventListener('click', () => showLogin());
+  btn.addEventListener('click', () => { location.href = 'login.html'; });
   $('btnLogout').before(btn);
   $('btnLogout').style.display = 'none';   // 游客无登录态，隐藏退出
 }
@@ -250,11 +237,14 @@ function closeModal(id) { $(id).classList.remove('show'); }
 
 // ---------- 事件绑定 ----------
 function bindEvents() {
-  $('loginForm').addEventListener('submit', e => { e.preventDefault(); doLogin($('inpLoginEmail').value.trim(), $('inpLoginPwd').value); });
-  $('regForm').addEventListener('submit', e => { e.preventDefault(); doReg($('inpRegName').value.trim(), $('inpRegEmail').value.trim(), $('inpRegPwd').value); });
-  $('linkToReg').addEventListener('click', () => { $('loginForm').style.display = 'none'; $('regForm').style.display = 'block'; $('loginSub').textContent = '创建你的账号'; });
-  $('linkToLogin').addEventListener('click', () => { $('regForm').style.display = 'none'; $('loginForm').style.display = 'block'; $('loginSub').textContent = '登录后进入项目列表'; });
-  $('btnLogout').addEventListener('click', async () => { await logout(); me = null; showLogin(); });
+  // 退出登录：清掉游客标记后再去登录页 —— 否则「退出」之后会被游客标记自动放行回来，
+  // 看起来像退出失败
+  $('btnLogout').addEventListener('click', async () => {
+    await logout();
+    me = null;
+    leaveGuest();
+    goLogin();
+  });
   $('btnNewProj').addEventListener('click', openNewProj);
   $('btnNewProjSave').addEventListener('click', saveNewProj);
   $('btnNewProjCancel').addEventListener('click', () => closeModal('maskNewProj'));
@@ -271,18 +261,28 @@ function bindEvents() {
   }));
 }
 
-// ---------- 初始化（会话恢复） ----------
+// ---------- 初始化（登录守卫 + 会话恢复） ----------
+// 三条出路，按优先级：
+//   1) 有会话且资料读得到 → 正常进入（管理员还会拉用户列表）
+//   2) 没有会话但是游客（登录页点过「游客进入」）→ 只读进入
+//   3) 其余 → 去登录页。原先这里是"未登录也直接游客进入"，于是登录页形同虚设：
+//      任何人打开 index.html 就已经在系统里了。改成独立路由后必须显式选一次。
 function init() {
   bindEvents();
-  getSession().then(({ data }) => {
-    if (data.session) {
-      fetchMyProfile().then(p => { if (p) enterApp(); else showLogin(); });
-    } else {
-      // 未登录：不再强制停在登录页，直接进入游客模式（只读浏览项目与排期）
-      me = null;
-      enterApp();
-    }
-  });
+  getSession()
+    .then(({ data }) => enterWith(!!(data && data.session)))
+    // 会话读取异常（配置缺失 / 存储不可用）：按"未登录"处理 —— 游客标记仍然生效，
+    // 否则一个网络抖动就会把正在只读浏览的人踢出去
+    .catch(() => enterWith(false));
+}
+
+function enterWith(hasSession) {
+  if (hasSession) {
+    fetchMyProfile().then(p => { if (p) enterApp(); else goLogin(); });
+    return;
+  }
+  if (isGuest()) { me = null; enterApp(); return; }
+  goLogin();
 }
 
 init();

@@ -1,0 +1,73 @@
+/* ============================================================
+   login.css — 登录页（login.html）专属样式
+   ------------------------------------------------------------
+   原先这套卡片样式混在 index.html 的内联 <style> 里，与项目列表共用一份；
+   拆出独立路由后各页只留自己要的：这一页只有"登录 / 注册 / 游客"三件事。
+
+   配色变量与主站同源（--hero / --accent 一套），保证从登录页走进项目列表
+   不会换一次肤色。
+   ============================================================ */
+:root{
+  --ink:#0f1729;--muted:#64748b;--line:#e2e8f0;--bg:#eef1f7;
+  --accent:#0e7490;--accent-strong:#0a566b;--accent-soft:#eaf7fa;--accent-line:#c1e6f0;
+  --accent-ink:#094758;--accent-ring:rgba(14,116,144,.18);
+  --hero:#0e7490;--hero-deep:#041a20;--hero-soft:#d2edf4;
+  --blue:var(--accent);--red:#ef4444;
+  --shadow:0 8px 30px rgba(15,23,42,.10);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
+
+/* 整页居中。用 min-height + padding 而不是 position:fixed：
+   注册表单在小屏/长文案下可能超出视口，固定定位会把它裁掉且无法滚动 */
+#viewLogin{min-height:100vh;background:linear-gradient(135deg,var(--hero-deep),var(--hero));
+  display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.login-card{background:#fff;border-radius:16px;padding:36px 40px;width:360px;max-width:100%;
+  box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.login-card h1{font-size:20px;font-weight:800;margin-bottom:4px}
+.login-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
+
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:#334155;font-weight:600;margin-bottom:5px}
+.field input,.field select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;
+  font-size:13px;outline:none;transition:border-color .15s;font-family:inherit;background:#fff;color:var(--ink)}
+.field input:focus,.field select:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--accent-ring)}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:13px;
+  border:1px solid var(--line);background:#fff;color:#334155;border-radius:8px;padding:8px 16px;
+  cursor:pointer;font-weight:600;transition:all .15s;font-family:inherit}
+.btn:hover{border-color:var(--blue);color:var(--blue)}
+.btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.primary:hover{filter:brightness(1.08);color:#fff}
+.btn.ghost{color:var(--muted);font-weight:500}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent-ink)}
+.btn.block{width:100%}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+
+.err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
+.hint{font-size:11px;color:var(--muted);text-align:center;margin-top:16px}
+.toggle-link{color:var(--blue);cursor:pointer;font-weight:600}
+.toggle-link:hover{text-decoration:underline}
+
+/* ---- 游客入口 ----
+   分隔线 + 次级按钮：它是"不想登录时的另一条路"，不是主行动，
+   所以不能长得比「登录」还抢眼（否则人人都会点它，账号体系形同虚设） */
+.guest-box{margin-top:22px;padding-top:18px;border-top:1px dashed var(--line)}
+.guest-or{position:relative;text-align:center;font-size:10px;color:#94a3b8;margin:-28px 0 14px}
+.guest-or span{background:#fff;padding:0 8px}
+.btn.guest{width:100%;border-style:dashed;color:#475569}
+.btn.guest:hover{border-style:solid;border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
+.guest-tip{font-size:11px;color:#94a3b8;line-height:1.6;text-align:center;margin-top:8px}
+
+/* 移动端：卡片铺满、控件拉到 44px 触摸目标（与主站同一套移动端尺寸） */
+@media(max-width:640px){
+  #viewLogin{padding:18px 12px}
+  .login-card{width:100%;max-width:none;padding:26px 20px;border-radius:14px}
+  .login-card h1{font-size:19px}
+  .login-sub{margin-bottom:20px}
+  .field{margin-bottom:16px}
+  .field label{font-size:13px}
+  .field input,.field select{min-height:46px;font-size:15px}
+  .btn{padding:10px 16px;font-size:14px;min-height:44px}
+  .hint{margin-top:18px;font-size:12px}
+}

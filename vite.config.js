@@ -20,8 +20,10 @@ function findFile(dir, target) {
   return null;
 }
 
-// 多页入口：排期页(gantt.html) + 登录/列表页(index.html)
+// 多页入口：登录页(login.html) + 项目列表(index.html) + 排期页(gantt.html)
 // export 模式：仅构建 standalone 单文件导出模板
+//
+// ⚠️ 新增页面必须加进 input，否则构建产物 dist/ 里没有这一页（dev server 能打开、部署后 404）
 export default defineConfig(({ mode }) => {
   const isExport = mode === 'export';
   return {
@@ -29,7 +31,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: isExport
           ? { standalone: 'src/standalone.html' }
-          : { index: 'index.html', gantt: 'gantt.html' }
+          : { login: 'login.html', index: 'index.html', gantt: 'gantt.html' }
       },
       outDir: isExport ? 'dist/export' : 'dist',
       assetsInlineLimit: 100000000,
@@ -58,25 +60,29 @@ export default defineConfig(({ mode }) => {
         }
       },
       // 外部脚本（supabase UMD / 项目配置）不进打包图，构建后原样复制到 dist
+      // ⚠️ HTML 里用 <script src="xxx.js"> 引用的根级文件都必须列在这里，否则线上 404
       !isExport && {
         name: 'copy-root-assets',
         apply: 'build',
         closeBundle() {
           const outDir = resolve(ROOT, 'dist');
-          [['lib/supabase.js', 'lib/supabase.js'], ['supabase-config.js', 'supabase-config.js']].forEach(
-            ([from, to]) => {
-              const src = resolve(ROOT, from);
-              // supabase-config.js 属本地私有配置（已 gitignore），新克隆的仓库里可能不存在：
-              // 跳过并提示，避免整个构建因缺文件而中断。
-              if (!existsSync(src)) {
-                console.warn(
-                  `[copy-root-assets] 跳过缺失文件 ${from}（请复制 supabase-config.example.js 为 supabase-config.js 并填写配置）`
-                );
-                return;
-              }
-              cpSync(src, resolve(outDir, to));
+          [
+            ['lib/supabase.js', 'lib/supabase.js'],
+            ['supabase-config.js', 'supabase-config.js'],
+            ['feishu-config.js', 'feishu-config.js']
+          ].forEach(([from, to]) => {
+            const src = resolve(ROOT, from);
+            // supabase-config.js / feishu-config.js 属本地私有配置（已 gitignore），
+            // 新克隆的仓库里可能不存在：跳过并提示，避免整个构建因缺文件而中断。
+            if (!existsSync(src)) {
+              const example = from.replace(/\.js$/, '.example.js');
+              console.warn(
+                `[copy-root-assets] 跳过缺失文件 ${from}（请复制 ${example} 为 ${from} 并填写配置）`
+              );
+              return;
             }
-          );
+            cpSync(src, resolve(outDir, to));
+          });
         }
       }
     ].filter(Boolean),

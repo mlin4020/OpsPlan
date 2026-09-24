@@ -14,11 +14,9 @@
 :root{--ink:#0f1729;--muted:#64748b;--line:#e2e8f0;--bg:#eef1f7;--accent:#0e7490;--accent-strong:#0a566b;--accent-soft:#eaf7fa;--accent-line:#c1e6f0;--accent-ink:#094758;--accent-ring:rgba(14,116,144,.18);--hero:#0e7490;--hero-deep:#041a20;--hero-soft:#d2edf4;--blue:var(--accent);--red:#ef4444;--amber:#f59e0b;--shadow:0 8px 30px rgba(15,23,42,.10)}
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh}
-#viewLogin{position:fixed;inset:0;background:linear-gradient(135deg,var(--hero-deep),var(--hero));display:flex;align-items:center;justify-content:center;z-index:20}
-.login-card{background:#fff;border-radius:16px;padding:36px 40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+/* 登录卡片相关样式已随独立路由迁到 src/styles/login.css（login.html 引入）。
+   本页只留项目列表要用的：.brand 仍被 hero 里那个品牌位复用，故保留 */
 .brand{font-size:10px;letter-spacing:3px;color:var(--accent);font-weight:700;margin-bottom:6px}
-.login-card h1{font-size:20px;font-weight:800;margin-bottom:4px}
-.login-sub{font-size:12px;color:var(--muted);margin-bottom:24px}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:12px;color:#334155;font-weight:600;margin-bottom:5px}
 .field input,.field select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;outline:none;transition:border-color .15s;font-family:inherit;background:#fff}
@@ -35,9 +33,6 @@ body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;backgroun
 .btn.sm{padding:5px 10px;font-size:12px}
 .btn.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 .err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
-.hint{font-size:11px;color:var(--muted);text-align:center;margin-top:16px}
-.toggle-link{color:var(--blue);cursor:pointer;font-weight:600}
-.toggle-link:hover{text-decoration:underline}
 #viewMain{display:none;min-height:100vh}
 .hero{background:linear-gradient(135deg,var(--hero-deep),var(--hero));color:#fff;padding:14px 28px;display:flex;align-items:center;gap:18px}
 .hero .brand{color:var(--hero-soft);margin:0}
@@ -106,44 +101,21 @@ body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;backgroun
   .user-row{flex-wrap:wrap;gap:8px;padding:11px 0;font-size:12.5px}
   .user-row .btn{min-height:38px;padding:7px 13px;font-size:12.5px}
 
-  /* ---- 登录 / 注册 ---- */
-  .login-card{width:calc(100vw - 32px);max-width:400px;padding:26px 20px;border-radius:14px}
-  .login-card h1{font-size:19px}
-  .login-sub{margin-bottom:20px}
+  /* ---- 表单控件（弹窗里用） ----
+       登录卡片那套尺寸已随路由迁到 src/styles/login.css */
   .field{margin-bottom:16px}
   .field label{font-size:13px}
   .field input,.field select{min-height:46px;font-size:15px}
   .btn{padding:10px 16px;font-size:14px;min-height:44px}
   .btn.sm{padding:8px 12px;font-size:12.5px;min-height:36px}
-  .hint{margin-top:18px;font-size:12px}
 }
 </style>
 </head>
 <body>
 
-<div id="viewLogin">
-  <div class="login-card">
-    <div class="brand"></div>
-    <h1>OpsPlan</h1>
-    <div class="login-sub">登录后进入项目列表</div>
-    <form id="loginForm" autocomplete="on">
-      <div class="field"><label>邮箱</label><input type="email" id="inpLoginEmail" placeholder="you@company.com" required></div>
-      <div class="field"><label>密码</label><input type="password" id="inpLoginPwd" placeholder="••••••••" required></div>
-      <button class="btn primary block" type="submit" id="btnLogin">登 录</button>
-      <div class="err" id="loginErr"></div>
-      <div class="hint">没有账号？<span class="toggle-link" id="linkToReg">注册</span></div>
-    </form>
-    <form id="regForm" autocomplete="on" style="display:none">
-      <div class="field"><label>姓名</label><input type="text" id="inpRegName" placeholder="张三"></div>
-      <div class="field"><label>邮箱</label><input type="email" id="inpRegEmail" required></div>
-      <div class="field"><label>密码</label><input type="password" id="inpRegPwd" minlength="6" required></div>
-      <button class="btn primary block" type="submit" id="btnReg">注 册</button>
-      <div class="err" id="regErr"></div>
-      <div class="hint">已有账号？<span class="toggle-link" id="linkToLogin">返回登录</span></div>
-    </form>
-  </div>
-</div>
-
+<!-- 登录已拆到独立路由 login.html（见该文件与 src/main-login.js）。
+     本页只负责项目列表：未登录且不是游客时，由 main-index.js 直接跳去登录页，
+     因此这里不再内嵌登录卡片。 -->
 <div id="viewMain">
   <div class="hero">
     <span class="brand"></span>
