@@ -191,8 +191,27 @@ function rowHtml(mo, ctx) {
   </tr>`;
 }
 
+// 排序方式下拉的选项：值编码成 "key:dir"，与 viewState.reqSort 一一对应。
+// 为什么要这个下拉：排序原先只能点表头，而表头没有任何"可点"的暗示，
+// 用户基本发现不了；再加上首列现在默认按「关注度」排（不对应任何单一列），
+// 光靠表头点击也无法表达这个状态。
+const SORT_OPTIONS = [
+  ['focus:asc', '关注度排序'],
+  ['pri:asc', '优先级（高在前）'],
+  ['end:asc', '计划结束日（近在前）'],
+  ['end:desc', '计划结束日（远在前）'],
+  ['start:asc', '排期开始日（早在前）'],
+  ['pct:asc', '完成度（低在前）'],
+  ['pct:desc', '完成度（高在前）'],
+  ['lifecycle:asc', '生命周期（流程先后）'],
+  ['ship:asc', '计划上线日（近在前）'],
+  ['proposed:desc', '提出时间（近在前）'],
+  ['name:asc', '需求名'],
+  ['order:asc', '甘特图顺序']
+];
+
 // 筛选条：所有控件都带 data-req-* 属性，交给 components/req-page.js 委托
-function filterBar(filter, versions, total, shown) {
+function filterBar(filter, sort, versions, total, shown) {
   const opt = (v, label, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${label}</option>`;
   const verOpts = ['all', 'none', ...versions.map(v => v.id)].map(v => {
     if (v === 'all') return opt('all', '全部版本', filter.ver);
@@ -219,6 +238,10 @@ function filterBar(filter, versions, total, shown) {
     </select>
     <select class="req-f" data-req-f="unscheduled">
       ${opt('all', '排期不限', filter.unscheduled)}${opt('only', '只看待排期', filter.unscheduled)}${opt('exclude', '排除待排期', filter.unscheduled)}
+    </select>
+    <select class="req-f req-sortsel" data-req-sortsel title="排序方式（点击表头也可切换）">
+      ${SORT_OPTIONS.map(([val, label]) =>
+        `<option value="${esc(val)}"${(sort.key + ':' + sort.dir) === val ? ' selected' : ''}>${label}</option>`).join('')}
     </select>
     <button type="button" class="btn ghost" data-req-reset>重置</button>
     <span class="req-count">${shown === total ? `共 ${total} 个需求` : `筛选后 ${shown} 个 / 共 ${total} 个`}</span>
@@ -316,7 +339,7 @@ export function renderReqView(container, ctx) {
 
   const head = `<div class="report-sec">
     <div class="report-head">需求台账<span>全部需求清单（含待排期与已归档）· 点任意一行展开需求档案</span></div>
-    ${filterBar(filter, versions, all.length, hit.length)}`;
+    ${filterBar(filter, sort, versions, all.length, hit.length)}`;
 
   if (!hit.length) {
     return `<div class="report-wrap req-wrap">${head}

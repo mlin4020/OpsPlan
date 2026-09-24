@@ -297,6 +297,6 @@ describe('req-page: 台账事件委托', () => {
     delete deps.viewState.reqSort;
     bindReqPage(deps);
     expect(deps.viewState.reqFilter.scope).toBe('all');
-    expect(deps.viewState.reqSort.key).toBe('order');
+    expect(deps.viewState.reqSort.key).toBe('focus');   // 默认按关注度排，不再按甘特图顺序
   });
 });

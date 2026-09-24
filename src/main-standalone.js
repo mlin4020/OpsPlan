@@ -17,7 +17,7 @@ import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays } from './core/default-data.js';
 import { defaultWorkFilter } from './core/work-filter.js';
-import { defaultReqFilter, defaultReqSort } from './core/mod-query.js';
+import { defaultReqFilter, defaultReqSort, loadReqView, saveReqView } from './core/mod-query.js';
 import { createScheduler } from './scheduler/index.js';
 import { buildViewerShellHTML } from './components/shell.js';
 import { bindWorkFilter } from './components/work-filter.js';
@@ -98,12 +98,15 @@ function boot() {
 
   // ---- 渲染 ctx（只读：无 ctxInjection 组件注入） ----
   // ?me=某人：资源工作视图的"看自己"深链，与排期页同一套口径（导出件发给个人时尤其好用）
+  const savedReqView = loadReqView('');
   const viewState = {
     view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: ZOOM_DAYW.day,
     workFilter: { ...defaultWorkFilter(), person: (params.get('me') || '').trim() },
     // 需求台账的筛选与排序（查看器里同样可筛可排，只是不能改数据）
-    reqFilter: defaultReqFilter(),
-    reqSort: defaultReqSort()
+    // 同样记忆上次选择：查看器常被反复打开看同一份排期，每次重设筛选很烦。
+    // 单文件查看器没有 projectId，用 'default' 桶，与主应用各项目互不干扰。
+    reqFilter: savedReqView.filter,
+    reqSort: savedReqView.sort
   };
   const baseCtx = {
     state: planStore.state,
@@ -147,7 +150,12 @@ function boot() {
   });
   // 需求台账：查看器里同样要能展开档案 / 排序 / 筛选（领导看的就是这个）。
   // isReadonly 固定 true：查看器全只读，写操作拦在最前面（按钮另有 CSS 隐藏，这是第二道防线）
-  bindReqPage({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, toggleReqExpanded, isReadonly: () => true });
+  bindReqPage({
+    gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, toggleReqExpanded,
+    isReadonly: () => true,
+    // 查看器也记忆查询条件（只写界面偏好，不碰数据，与只读不冲突）
+    projectId: '', saveReqView
+  });
 
   // ---- 工具栏：视图切换 + 缩放（日/周/月 + 滑块） ----
   const syncViewBtns = () => document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === viewState.view));

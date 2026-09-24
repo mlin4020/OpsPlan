@@ -1,7 +1,7 @@
 // 需求台账的筛选与排序：纯函数，不依赖 DOM
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { F } from '../src/core/dates.js';
-import { filterMods, sortMods, collectProposers, defaultReqFilter } from '../src/core/mod-query.js';
+import { filterMods, sortMods, collectProposers, defaultReqFilter, loadReqView, saveReqView } from '../src/core/mod-query.js';
 
 const today = F('2026-08-20');
 
@@ -224,5 +224,92 @@ describe('mod-query: 新增排序键（提出时间 / 生命周期 / 确认时�
     ];
     expect(names(sortMods(mods, 'confirm', 'asc', deps))).toEqual(['A', 'C', 'B']);
     expect(names(sortMods(mods, 'confirm', 'desc', deps))).toEqual(['C', 'A', 'B']);
+  });
+});
+
+describe('mod-query: 关注度排序（focus）', () => {
+  // 逾期判定要求「有资源」——没人负责的活儿不算逾期（见 core/task-status.js），
+  // 所以下面所有造数据都带上 res，否则逾期这一档永远命中不了。
+  const bar = o => ({ id: o.id || 'b', p: o.p || 'dev', res: ['张三'], done: 0, ...o });
+  const focusOrder = mods => names(sortMods(mods, 'focus', 'asc', deps));
+
+  it('分层顺序：已逾期 → 待排期 → 待启动 → 已完成 → 已归档', () => {
+    const mods = [
+      { name: '已完成', pri: 'P0', bars: [bar({ s: '2026-08-01', e: '2026-08-05', done: 100 })] },
+      // 已归档即使逾期也要沉到最底：它已退出活跃跟踪
+      { name: '已归档', pri: 'P0', archived: true, bars: [bar({ s: '2026-07-01', e: '2026-07-05' })] },
+      { name: '已逾期', pri: 'P3', bars: [bar({ s: '2026-08-01', e: '2026-08-10' })] },
+      { name: '待启动', pri: 'P0', bars: [bar({ s: '2026-10-01', e: '2026-10-05' })] },
+      { name: '待排期', pri: 'P0', unscheduled: true, bars: [bar({ s: '2026-10-01', e: '2026-10-05' })] }
+    ];
+    expect(focusOrder(mods)).toEqual(['已逾期', '待排期', '待启动', '已完成', '已归档']);
+  });
+
+  it('分层永远压过优先级（P3 已逾期 仍在 P0 已归档 之前）', () => {
+    const mods = [
+      { name: 'P0已归档', pri: 'P0', archived: true, bars: [bar({ s: '2026-07-01', e: '2026-07-05' })] },
+      { name: 'P3已逾期', pri: 'P3', bars: [bar({ s: '2026-08-01', e: '2026-08-10' })] }
+    ];
+    expect(focusOrder(mods)).toEqual(['P3已逾期', 'P0已归档']);
+  });
+
+  it('同层内按优先级：P0 在 P3 前，未设优先级排在同层最后', () => {
+    const late = () => [bar({ s: '2026-08-01', e: '2026-08-10' })];
+    const mods = [
+      { name: 'P3', pri: 'P3', bars: late() },
+      { name: '无优先级', bars: late() },
+      { name: 'P0', pri: 'P0', bars: late() }
+    ];
+    expect(focusOrder(mods)).toEqual(['P0', 'P3', '无优先级']);
+  });
+
+  it('同层同优先级时，计划结束日近的在前', () => {
+    const mods = [
+      { name: '晚', pri: 'P1', bars: [bar({ s: '2026-08-01', e: '2026-08-19' })] },
+      { name: '早', pri: 'P1', bars: [bar({ s: '2026-07-01', e: '2026-08-05' })] }
+    ];
+    expect(focusOrder(mods)).toEqual(['早', '晚']);
+  });
+});
+
+describe('mod-query: 查询条件持久化', () => {
+  // node 环境没有 localStorage，用内存版打桩（与 scheduler.test.js 同一套做法）
+  const store = new Map();
+  beforeEach(() => {
+    store.clear();
+    globalThis.localStorage = {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k)
+    };
+  });
+
+  it('没存过时返回默认值（默认按关注度排）', () => {
+    const v = loadReqView('p1');
+    expect(v.filter.scope).toBe('all');
+    expect(v.sort.key).toBe('focus');
+  });
+
+  it('存了能还原，且不同项目互不干扰', () => {
+    saveReqView('p1', { ...defaultReqFilter(), scope: 'active', kw: '看板' }, { key: 'pri', dir: 'desc' });
+    const v1 = loadReqView('p1');
+    expect(v1.filter.scope).toBe('active');
+    expect(v1.filter.kw).toBe('看板');
+    expect(v1.sort).toEqual({ key: 'pri', dir: 'desc' });
+    expect(loadReqView('p2').filter.scope).toBe('all');
+  });
+
+  it('老快照缺字段时逐字段回退默认值（以后加筛选维度不会让整份配置失效）', () => {
+    store.set('opsplan.reqView.v1:p1', JSON.stringify({ filter: { scope: 'archived' }, sort: { key: 'pri' } }));
+    const v = loadReqView('p1');
+    expect(v.filter.scope).toBe('archived');   // 存了的照用
+    expect(v.filter.lifecycle).toBe('all');    // 没存的回退默认
+    expect(v.sort.key).toBe('pri');
+    expect(v.sort.dir).toBe('asc');            // dir 缺失时回退 asc
+  });
+
+  it('快照损坏时回退默认值，不抛错', () => {
+    store.set('opsplan.reqView.v1:p1', '{ 这不是 json');
+    expect(loadReqView('p1').sort.key).toBe('focus');
   });
 });

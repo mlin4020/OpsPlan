@@ -31,7 +31,18 @@ export function bindReqPage(deps) {
 
   let caret = null;   // 搜索框重绘后要还原的光标位置（null = 本次不需要还原）
 
+  // 查询条件落盘：防抖 300ms —— 搜索框是逐字触发的，
+  // 不加防抖会每敲一个键就写一次 localStorage（同步 API，打多了会卡输入）
+  let persistTimer = null;
+  const persist = () => {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      if (deps.saveReqView) deps.saveReqView(deps.projectId, curF(), curS());
+    }, 300);
+  };
+
   const apply = (opts) => {
+    persist();
     if (typeof deps.render === 'function') deps.render();
     // 换筛选范围 = 列表整块重排，留在原滚动位置多半落进空白，故回到顶部；打字则保持原位
     if (opts && opts.top && deps.gsc) deps.gsc.scrollTop = 0;
@@ -97,6 +108,16 @@ export function bindReqPage(deps) {
     if (!t || !t.closest) return;
     const inline = t.closest('[data-req-inline]');
     if (inline) { commitInline(inline); return; }
+    // 排序方式下拉：值编码成 "key:dir"
+    const sortSel = t.closest('[data-req-sortsel]');
+    if (sortSel) {
+      const [key, dir] = String(sortSel.value || 'focus:asc').split(':');
+      const s = curS();
+      s.key = key;
+      s.dir = dir === 'desc' ? 'desc' : 'asc';
+      apply({ top: true });
+      return;
+    }
     const el = t.closest('[data-req-f]');
     if (!el) return;
     curF()[el.dataset.reqF] = el.value || 'all';

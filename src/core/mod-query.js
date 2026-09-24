@@ -14,6 +14,8 @@ import { moduleTag, findGateMs } from './mod-tag.js';
 import { versionOfMap, findGoMs } from './versions.js';
 import { modStats } from './mod-stats.js';
 import { PRIORITIES, MODULE_LIFECYCLE } from './default-data.js';
+import { F } from './dates.js';
+import { isOverdueTask } from './task-status.js';
 
 const norm = s => String(s == null ? '' : s).toLowerCase();
 
@@ -21,8 +23,46 @@ const norm = s => String(s == null ? '' : s).toLowerCase();
 export function defaultReqFilter() {
   return { kw: '', status: 'all', pri: 'all', ver: 'all', scope: 'all', unscheduled: 'all', lifecycle: 'all' };
 }
+// 默认按「关注度」而不是甘特图顺序：这页是给领导与业务看的，
+// 一进来先看到"最该被处理的那几条"比"按排期先后"有用得多。
 export function defaultReqSort() {
-  return { key: 'order', dir: 'asc' };
+  return { key: 'focus', dir: 'asc' };
+}
+
+// ============================================================
+// 查询条件的持久化
+// ------------------------------------------------------------
+// 原先每次打开页面筛选与排序都回到默认值，用户每回都要重设一遍。
+// 存 localStorage 而不是 planStore：它是"这个人习惯怎么看"，属于界面偏好，
+// 不该进数据文件，更不该同步给别的使用者（各人关注点不同）。
+// 按 projectId 隔离：不同项目的关注范围本来就不一样。
+// ============================================================
+const REQ_VIEW_LS = 'opsplan.reqView.v1';
+
+function lsRead(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function lsWrite(key, val) { try { localStorage.setItem(key, val); } catch (e) { /* 隐私模式等写入失败，忽略 */ } }
+
+export function loadReqView(projectId) {
+  const out = { filter: defaultReqFilter(), sort: defaultReqSort() };
+  const raw = lsRead(REQ_VIEW_LS + ':' + (projectId || 'default'));
+  if (!raw) return out;
+  let saved;
+  try { saved = JSON.parse(raw); } catch (e) { return out; }
+  // 逐字段合并而不是整体替换：以后新增筛选维度时，
+  // 旧快照缺的键会自动取默认值，不会因为老数据缺字段而整个失效
+  if (saved && saved.filter) {
+    Object.keys(out.filter).forEach(k => { if (saved.filter[k] != null) out.filter[k] = saved.filter[k]; });
+  }
+  if (saved && saved.sort && saved.sort.key) {
+    out.sort.key = saved.sort.key;
+    out.sort.dir = saved.sort.dir === 'desc' ? 'desc' : 'asc';
+  }
+  return out;
+}
+
+export function saveReqView(projectId, filter, sort) {
+  if (!filter || !sort) return;
+  lsWrite(REQ_VIEW_LS + ':' + (projectId || 'default'), JSON.stringify({ filter, sort }));
 }
 
 export function filterMods(mods, filter, deps) {
@@ -67,6 +107,48 @@ export function filterMods(mods, filter, deps) {
     }
     return true;
   });
+}
+
+// ============================================================
+// 「关注度」排序（focus）：把当前最需要你动手的需求排到最上面。
+//
+// 为什么用分层桶而不是加权分数：分层的每一档都能直接讲给用户听，
+// 也能解释"这条为什么排第一"；加权分做不到——它只会吐出一个说不清的数字，
+// 回头想调整权重还得先反推各因子的量纲。
+//
+// 分层（数字越小越靠前）：
+//   0 已逾期   —— 有任务超期未完成，要救火
+//   1 进度落后 —— 尚未逾期，但完成度已低于应达（EV < PV）
+//   2 临近交付 —— 未完成且在 7 个自然日内到期
+//   3 待排期   —— 还没排期，需求躺着没人管，本身就是要处理的一件事
+//   4 正常推进 —— 进行中且不落后
+//   5 待启动   —— 还没开工
+//   6 已完成   —— 交付完成，沉底
+//   7 已归档   —— 留档查阅，最底
+// ============================================================
+const FOCUS_DUE_SOON_DAYS = 7;
+
+function focusTier(mo, deps) {
+  const { today, ctx, modRange } = deps || {};
+  if (mo.archived) return 7;
+  const tasks = (mo.bars || []).filter(b => b && !b.m);
+  const allDone = tasks.length > 0 && tasks.every(b => (b.done || 0) >= 100);
+  if (allDone) return 6;
+  if (mo.unscheduled) return 3;
+  const day = today instanceof Date ? today : F(today);
+  if (tasks.some(b => isOverdueTask(b, day))) return 0;
+  // 进度落后：需要 workday 才判得准（modStats 依赖 ctx），缺 ctx 时跳过这一档
+  if (ctx) {
+    const st = modStats(mo.bars, ctx);
+    if (st.work && st.pct < st.planPct - 0.5) return 1;
+  }
+  const rng = modRange ? modRange(mo) : null;
+  if (rng && day && rng.end) {
+    const days = Math.round((rng.end.getTime() - day.getTime()) / 864e5);
+    if (days <= FOCUS_DUE_SOON_DAYS) return 2;
+  }
+  const started = tasks.some(b => (b.done || 0) > 0 || (b.s && F(b.s) <= day));
+  return started ? 4 : 5;
 }
 
 // 排序取值：{ v } 有值 / { miss: true } 无值。
@@ -117,6 +199,23 @@ function sortValue(mo, key, deps) {
       if (v && v.date) return { v: v.date };
       const go = findGoMs(mo);
       return go && go.m ? { v: go.m } : { miss: true };
+    }
+    // 关注度：分层 → 优先级 → 计划结束日，三级压进一个数。
+    // 量级刻意拉开（1e9 / 1e7），保证"分层永远压过优先级，优先级永远压过日期"——
+    // 否则「高优先级但还早」会插到「低优先级但已逾期」前面，正好违背初衷。
+    case 'focus': {
+      const tier = focusTier(mo, deps);
+      const pi = PRIORITIES.indexOf(mo.pri);
+      const priRank = pi < 0 ? PRIORITIES.length : pi;   // 未设优先级排在同档最后
+      let dayScore = 1000;                                // 无排期居中，不因缺日期而占便宜
+      const rng = modRange ? modRange(mo) : null;
+      if (rng && rng.end) {
+        const day = today instanceof Date ? today : F(today);
+        const days = Math.round((rng.end.getTime() - day.getTime()) / 864e5);
+        // 已过期得负分、越早越该靠前；夹在 0~2000 内（小于 1e7，不会串到优先级位）
+        dayScore = Math.max(0, Math.min(2000, days + 1000));
+      }
+      return { v: tier * 1e9 + priRank * 1e7 + dayScore };
     }
     default:
       return { v: 0 };
