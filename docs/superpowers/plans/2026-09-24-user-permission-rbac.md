@@ -162,11 +162,15 @@ import {
   canPlan, canEditProjectMeta, canDeleteProject, canManageUsers
 } from '../src/utils/permission.js';
 
+// 注意：这里**不要**手写「collab + 空人名」这种组合的常量。
+// 真源 resolveAccess 的定义就是「collab ⟺ 已登录 且 resource_name 非空」，
+// 所以「没配人名」必然落到 readonly —— 手写一个 collab+空人名 的 fixture 是在测一个
+// 真源永远产生不出来的状态（测试噪声，且会与 canEditTask/canEditModuleFields 的语义打架）。
+// 「没配人名 ⇒ 只读」这条不变量由下面的 `ctxOf 派生` 用例现算来锁定。
 const FULL = { access: ACCESS.FULL, rname: '张三', role: 'admin' };
 const OWNER = { access: ACCESS.FULL, rname: '张三', role: 'user' };
 const COLLAB = { access: ACCESS.COLLAB, rname: '张三', role: 'user' };
 const READONLY = { access: ACCESS.READONLY, rname: '', role: 'user' };
-const NO_NAME = { access: ACCESS.COLLAB, rname: '', role: 'user' };   // 协作者但没配人名
 
 describe('resolveAccess', () => {
   it('管理员与所属人都是 full，优先于人名', () => {
@@ -194,6 +198,26 @@ describe('ctxOf 向后兼容', () => {
     expect(() => ctxOf()).not.toThrow();
     expect(ctxOf().rname).toBe('');
     expect(ctxOf().role).toBe('user');
+  });
+});
+
+describe('没配对应人员 ⇒ 只读 ⇒ 一切写权限为假', () => {
+  // 这条不变量必须现算，不能手写常量：collab 的定义里就含"人名非空"，
+  // 手写一个 collab+空人名 的 ctx 等于在测一个不可达状态（见文件顶部注释）。
+  it('resolveAccess 把"有人名之外的一切"都落到只读', () => {
+    expect(resolveAccess({ role: 'user', resourceName: '' })).toBe(ACCESS.READONLY);
+    expect(resolveAccess({ role: 'user', resourceName: '   ' })).toBe(ACCESS.READONLY);
+    expect(resolveAccess({ role: 'user' })).toBe(ACCESS.READONLY);
+  });
+
+  it('即使把一个空人名的 ctx 传进来（防御性），也不该放行任何写权限', () => {
+    const anon = ctxOf({ readonly: false, resourceName: '' });
+    expect(anon.access).toBe(ACCESS.READONLY);
+    expect(canEditTask({ res: [] }, anon)).toBe(false);        // 连"未分配可认领"也不给
+    expect(canEditTask({ res: ['张三'] }, anon)).toBe(false);
+    expect(canEditModuleFields(anon)).toBe(false);
+    expect(canManageModule({ owner: '张三' }, anon)).toBe(false);
+    expect(canPlan(anon)).toBe(false);
   });
 });
 
@@ -229,10 +253,10 @@ describe('任务级判定', () => {
     expect(canEditTask({ res: [] }, COLLAB)).toBe(true);
     expect(canEditTask({ res: ['李四'] }, COLLAB)).toBe(false);
   });
-  it('readonly / 没配人名一律拒绝', () => {
+  it('readonly 一律拒绝', () => {
     expect(canEditTask({ res: [] }, READONLY)).toBe(false);
     expect(canEditTask({ res: ['张三'] }, READONLY)).toBe(false);
-    expect(canEditTask({ res: [] }, NO_NAME)).toBe(false);
+    expect(canEditTask({ res: ['李四'] }, READONLY)).toBe(false);
   });
 });
 
@@ -241,7 +265,6 @@ describe('需求级判定', () => {
     expect(canEditModuleFields(FULL)).toBe(true);
     expect(canEditModuleFields(COLLAB)).toBe(true);
     expect(canEditModuleFields(READONLY)).toBe(false);
-    expect(canEditModuleFields(NO_NAME)).toBe(false);
   });
   it('归属级：collab 仅限自己的需求，无主需求也不行', () => {
     expect(canManageModule({ owner: '李四' }, FULL)).toBe(true);
@@ -249,7 +272,6 @@ describe('需求级判定', () => {
     expect(canManageModule({ owner: '李四' }, COLLAB)).toBe(false);
     expect(canManageModule({}, COLLAB)).toBe(false);
     expect(canManageModule({ owner: '张三' }, READONLY)).toBe(false);
-    expect(canManageModule({ owner: '张三' }, NO_NAME)).toBe(false);
   });
 });
 
