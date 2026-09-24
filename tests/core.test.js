@@ -9,6 +9,7 @@ import {
 } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
 import { computePlanPct, computeModuleTag, unscheduledModSet, moduleTag, currentPhase, findGateMs } from '../src/core/mod-tag.js';
+import { earliestTaskStart, inferLifecycle, planRequirementBackfill } from '../src/core/backfill.js';
 import { modStats } from '../src/core/mod-stats.js';
 import { isOverdueTask } from '../src/core/task-status.js';
 import { planStore } from '../src/store/plan-store.js';
@@ -551,5 +552,79 @@ describe('core/mod-tag: findGateMs 关键时间点（需求确认 / 提测）', 
     expect(findGateMs({ bars: [] }, 'confirm')).toBe(null);
     expect(findGateMs(mo, 'nope')).toBe(null);
     expect(findGateMs(null, 'confirm')).toBe(null);
+  });
+});
+
+describe('core: 历史需求元信息回填（一次性）', () => {
+  const TODAY = F('2026-09-24');
+  const noVer = { modules: [], versions: [] };
+  const ctx = { proposedBy: '郑致远', today: TODAY, state: noVer };
+
+  describe('earliestTaskStart', () => {
+    it('取最早的任务开始日，且排除里程碑', () => {
+      // 里程碑的 m 是卡点日（常常比任务开始更晚），让它参与会把提出时间推后
+      const mo = { bars: [
+        { id: 'm', m: '2026-09-01', p: 'cfm', label: '需求确认' },
+        { id: 'a', p: 'dev', s: '2026-08-20', e: '2026-08-25' },
+        { id: 'b', p: 'sit', s: '2026-08-12', e: '2026-08-18' }
+      ] };
+      expect(earliestTaskStart(mo)).toBe('2026-08-12');
+    });
+
+    it('没有任务（含待排期）返回 null，不臆造日期', () => {
+      expect(earliestTaskStart({ bars: [] })).toBe(null);
+      expect(earliestTaskStart({})).toBe(null);
+      expect(earliestTaskStart({ bars: [{ id: 'm', m: '2026-09-01' }] })).toBe(null);
+    });
+  });
+
+  describe('inferLifecycle', () => {
+    it('所属版本已标记上线 → 已上线', () => {
+      const c = { today: TODAY, state: { modules: [], versions: [{ id: 'v1', name: 'V1', shipped: true, mods: ['X'] }] } };
+      expect(inferLifecycle({ name: 'X', bars: [] }, c)).toBe('已上线');
+    });
+
+    it('提测里程碑已过 → 已提测', () => {
+      const mo = { name: 'X', bars: [{ id: 'm', m: '2026-09-20', p: 'sit', label: '提测' }] };
+      expect(inferLifecycle(mo, ctx)).toBe('已提测');
+    });
+
+    it('提测里程碑还在未来时不能算已提测，落回已确认', () => {
+      const mo = { name: 'X', bars: [
+        { id: 'm', m: '2026-10-20', p: 'sit', label: '提测' },
+        { id: 'a', p: 'dev', s: '2026-09-10', e: '2026-09-20', done: 0 }
+      ] };
+      expect(inferLifecycle(mo, ctx)).toBe('已确认');
+    });
+
+    it('任务尚未开工 → 待确认', () => {
+      const mo = { name: 'X', bars: [{ id: 'a', p: 'dev', s: '2026-11-01', e: '2026-11-05', done: 0 }] };
+      expect(inferLifecycle(mo, ctx)).toBe('待确认');
+    });
+  });
+
+  describe('planRequirementBackfill', () => {
+    it('只补缺失字段，已有值原样保留（重复执行安全）', () => {
+      const mods = [
+        // 三项全空 → 三项都补
+        { name: '全空', bars: [{ id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-18', done: 0 }] },
+        // 三项都有 → 不出现在结果里，重复执行不会动它
+        { name: '已填', proposedBy: '张三', proposedAt: '2026-01-01', lifecycle: '已上线',
+          bars: [{ id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-18', done: 0 }] }
+      ];
+      const plan = planRequirementBackfill(mods, ctx);
+      expect(plan.length).toBe(1);
+      expect(plan[0]).toEqual({
+        name: '全空',
+        patch: { proposedBy: '郑致远', proposedAt: '2026-08-12', lifecycle: '已确认' }
+      });
+    });
+
+    it('待排期需求：提出时间取不到就留空，不补假值', () => {
+      const plan = planRequirementBackfill([{ name: '待排期', bars: [] }], ctx);
+      expect(plan[0].patch.proposedBy).toBe('郑致远');
+      expect('proposedAt' in plan[0].patch).toBe(false);
+      expect(plan[0].patch.lifecycle).toBe('待确认');
+    });
   });
 });

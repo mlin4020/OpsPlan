@@ -15,6 +15,11 @@ import { createWorkday } from './core/workday.js';
 import { defaultHolidays, PNAME } from './core/default-data.js';
 import { defaultWorkFilter } from './core/work-filter.js';
 import { defaultReqFilter, defaultReqSort } from './core/mod-query.js';
+import { planRequirementBackfill } from './core/backfill.js';
+
+// 历史数据回填时统一写入的提出人。这是具体的业务值（不是技术默认值），
+// 所以放在入口层而不是 core 常量里 —— core/backfill.js 只认调用方传什么。
+const BACKFILL_PROPOSED_BY = '郑致远';
 import { createScheduler } from './scheduler/index.js';
 import { bindAll } from './components/index.js';
 import { buildShellHTML, showFullLoading } from './components/shell.js';
@@ -134,6 +139,43 @@ function boot() {
     if (ui) ui.afterRender();
   }
 
+  // ---- 历史需求元信息回填（一次性）----
+  // 用法：在项目地址后追加 &backfill=1（如 index.html?project=xxx&backfill=1）。
+  // 为什么用 URL 参数而不是加按钮：这是一次性的数据修补，用完即弃，
+  // 不该在已经 11 列的台账工具栏上再长期占一个入口。
+  // 只补缺失字段、不覆盖已有值（见 core/backfill.js），重复执行安全。
+  function runBackfillIfRequested() {
+    let requested = false;
+    try {
+      requested = new URLSearchParams(location.search).get('backfill') === '1';
+    } catch (e) { /* URL 异常时当作没请求 */ }
+    if (!requested) return;
+
+    if (userStore.state.readonly) {
+      ui.onSyncStatus('fail', { msg: '只读模式下无法回填历史信息' });
+      return;
+    }
+    const plan = planRequirementBackfill(planStore.state.modules, {
+      proposedBy: BACKFILL_PROPOSED_BY,
+      today: new Date(),
+      state: planStore.state
+    });
+    if (!plan.length) {
+      ui.onSyncStatus('ok', { msg: '历史需求信息已完整，无需回填' });
+      return;
+    }
+    // updateModule 是 patch 语义（只传 oldName + 要改的字段），
+    // 且内部会走 assertEditable 与归一化；save() 有 300ms 防抖，N 条只落盘一次
+    plan.forEach(({ name, patch }) => sched.updateModule({ oldName: name, ...patch }));
+    // 抹掉 URL 参数，避免每次刷新重跑（虽有幂等兜底，但没必要）
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('backfill');
+      history.replaceState(null, '', url);
+    } catch (e) { /* 忽略 */ }
+    ui.onSyncStatus('ok', { msg: `已回填 ${plan.length} 个需求的历史信息` });
+  }
+
   // 只读状态（进入项目后由 editable 判定写入）
   let ui = null;
   function wireUI() {
@@ -207,6 +249,8 @@ function boot() {
         try { render(document.querySelector('.gscroll').scrollLeft); } catch (e) {}
       }
       hideLoading();
+      // 数据就位后再回填，避免在空数据上算出一堆空值
+      runBackfillIfRequested();
     });
   }
 

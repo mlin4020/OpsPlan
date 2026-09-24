@@ -77,19 +77,14 @@ export function shipInfo(mo, ctx) {
 // 需求文档链接：只放行 http/https（渲染层再兜一道，与录入时的校验形成双保险）
 const safeDocUrl = u => (/^https?:\/\//i.test(String(u || '')) ? u : null);
 
-function descCell(mo) {
-  const d = (mo.desc || '').trim();
-  // 空值也带 .req-desc：列宽与截断规则保持一致，不会因为有没有描述而抖动
-  if (!d) return '<span class="req-desc req-muted">—</span>';
-  // 单行截断 + title 全文：让读者知道"点开有没有内容"
-  return `<span class="req-desc" title="${esc(d)}">${esc(d)}</span>`;
-}
-
 function docCell(mo) {
   const u = safeDocUrl(mo.docUrl);
   if (!u) return '<span class="req-doc-empty req-muted">—</span>';
+  // 主行只给「有没有文档、能不能点开」；描述与文档全文都在展开档案里细读。
+  // 原先这里是一枚 📄 图标 + 单独一列「描述」，两列各占一份宽度却常常全空
+  // （描述多为空、文档多为「—」），故收成一列文字链接。
   return `<a class="req-doc" href="${esc(u)}" target="_blank" rel="noopener noreferrer"
-    title="打开需求文档（新窗口）" aria-label="打开需求文档">📄</a>`;
+    title="打开需求文档（新窗口）">需求文档</a>`;
 }
 
 // 提出信息：有哪项显示哪项，都没有显示「—」（与「未加入版本」同风格，不留空白）
@@ -149,7 +144,6 @@ function rowHtml(mo, ctx) {
     <td class="req-col-opt">${proposedCell(mo)}</td>
     <td><span class="tag" style="background:${tagc}">${tag}</span></td>
     <td class="req-c-lc">${lifecycleBadge(mo.lifecycle)}</td>
-    <td class="req-col-opt">${descCell(mo)}</td>
     <td class="req-col-opt">${docCell(mo)}</td>
     <td>${ver ? `${esc(ver.name)}<span class="req-sub">${ver.date ? fmtD(F(ver.date)) : ''}</span>` : '<span class="req-muted">未加入版本</span>'}</td>
     <td>${rng ? `<span class="req-sub">${fmtD(rng.start)}~${fmtD(rng.end)}</span>` : `<span class="req-muted">${mo.unscheduled ? '待排期' : '—'}</span>`}</td>
@@ -161,9 +155,9 @@ function rowHtml(mo, ctx) {
     </td>
     <td>${shipCell(ship)}</td>
     <td class="req-ops req-act">
-      <button type="button" class="btn sm" data-req-edit="${esc(mo.name)}">编辑</button>
-      <button type="button" class="btn sm ghost" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}">${mo.archived ? '取消归档' : '归档'}</button>
-      <button type="button" class="btn sm danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}">删除</button>
+      <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">✎</button>
+      <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? '↩' : '🗄'}</button>
+      <button type="button" class="ico-btn danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}" title="删除需求" aria-label="删除需求">✕</button>
     </td>
   </tr>`;
 }
@@ -321,8 +315,7 @@ export function renderReqView(container, ctx) {
             ${th('proposed', '提出', 'req-col-opt', '提出人 / 提出时间；窄屏隐藏该列（背景信息，不是对比指标）')}
             ${th('status', '状态')}
             ${th('lifecycle', '生命周期', '', '人工维护的流程门，与左侧自动计算的「状态」不是同一件事')}
-            <th class="req-col-opt">描述</th>
-            <th class="req-col-opt">文档</th>
+            <th class="req-col-opt" title="有需求文档链接时显示可点入口；无则「—」">文档</th>
             ${th('version', '所属版本')}
             ${th('start', '排期')}
             ${th('confirm', '关键时间', '', '需求确认 / 提测两个卡点的排期日期；点击按需求确认时间排序，缺里程碑的排最后')}

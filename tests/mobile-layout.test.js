@@ -443,9 +443,8 @@ describe('需求台账：样式契约（.req-*）', () => {
     expect(css).toMatch(/\.req-scroll\{[^}]*overflow-x:auto/);
   });
 
-  it('描述列单行截断，避免把行高撑开', () => {
-    expect(css).toMatch(/\.req-desc\{[^}]*text-overflow:ellipsis/);
-    expect(css).toMatch(/\.req-desc\{[^}]*white-space:nowrap/);
+  it('主行不再有描述列（描述收进展开档案，主行只给文档入口）', () => {
+    expect(css).not.toMatch(/\.req-desc\{/);   // 单列截断样式已随该列一并移除
   });
 
   it('展开区的描述保留换行（pre-wrap）', () => {

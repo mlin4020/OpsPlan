@@ -948,9 +948,10 @@ body.readonly-mode .ver-act{display:none}
   background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;white-space:nowrap}
 .req-sub{margin-left:6px;font-size:10.5px;color:#64748b;font-variant-numeric:tabular-nums}
 .req-muted{color:#94a3b8}
-/* 描述列：单行截断 + title 放全文（让读者知道"点开有没有内容"） */
-.req-desc{display:inline-block;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;color:#475569}
-.req-doc{font-size:15px;text-decoration:none}
+/* 文档列：只负责回答「有没有、能不能点开」。描述已不再单列（收进展开档案），
+   这里也从一枚 15px 的 📄 图标改成文字链接，读者一眼知道点开的是什么。 */
+.req-doc{font-size:11.5px;font-weight:700;color:var(--accent-ink);text-decoration:none;border-bottom:1px dashed currentColor}
+.req-doc:hover{color:var(--accent)}
 .req-doc-empty{font-size:12px}
 .req-pbar{display:inline-block;width:70px;height:6px;border-radius:4px;background:#e2e8f0;overflow:hidden;vertical-align:middle}
 .req-pbar i{display:block;height:100%;background:#16a34a}
@@ -968,6 +969,16 @@ body.readonly-mode .ver-act{display:none}
   border:1px solid #fecaca;border-radius:6px;padding:1px 6px;white-space:nowrap}
 .req-ops{white-space:nowrap}
 .req-ops .btn{margin-right:4px}
+/* 操作列图标按钮：原来「编辑 / 归档 / 删除」三个文字按钮在 12 列的表里太占宽度，
+   压成 26px 方图标；含义靠 title 与 aria-label 兜住（悬停可见、读屏可读） */
+.req-ops .ico-btn{width:26px;height:26px;padding:0;display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;line-height:1;color:#475569;background:#fff;border:1px solid #dbe3ee;border-radius:6px;
+  cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.req-ops .ico-btn+.ico-btn{margin-left:4px}
+.req-ops .ico-btn:hover{background:#f1f5ff;border-color:#c7d2fe;color:var(--accent-ink)}
+.req-ops .ico-btn.danger{color:#dc2626}
+.req-ops .ico-btn.danger:hover{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+.req-ops .ico-btn:disabled{opacity:.45;cursor:not-allowed}
 /* 只读：写操作与操作列整列隐藏（与版本页 .ver-act 同一套机制） */
 body.readonly-mode .req-act{display:none}
 /* 展开档案 */
@@ -990,7 +1001,8 @@ body.readonly-mode .req-act{display:none}
 .req-ms-dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 /* 需求台账新增三列（设计文档 §4.1）：都保持窄，避免 12 列过早横向滚动 */
 .req-c-lc{white-space:nowrap}
-.req-c-gate{white-space:nowrap}
+/* 关键时间允许换行：确认 / 提测两个 chip 在窄列里折成两行，而不是把整列撑宽 */
+.req-c-gate{white-space:normal}
 .req-prop{font-weight:700;color:#334155}
 /* 关键时间 chip：圆点取阶段色（与展开区「里程碑一览」同一套），日期加粗便于扫读 */
 .req-gate{display:inline-flex;align-items:center;gap:4px;margin-right:8px;font-size:11px;color:#475569;white-space:nowrap}

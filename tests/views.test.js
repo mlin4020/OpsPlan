@@ -491,8 +491,10 @@ describe('views: 需求台账主行表格', () => {
     const html = renderReqView(null, makeReqCtx());
     expect(html).toContain('req-wrap');
     expect(html).toContain('class="req-table"');
-    ['需求', '状态', '描述', '文档', '所属版本', '排期', '进度', '上线情况', '操作']
+    ['需求', '提出', '状态', '生命周期', '文档', '所属版本', '排期', '关键时间', '进度', '上线情况', '操作']
       .forEach(h => expect(html).toContain(h));
+    // 描述已不再单列（收进展开档案），主行只留文档入口，避免空列白占宽度
+    expect(html).not.toContain('<th class="req-col-opt">描述</th>');
   });
 
   it('标题区给出全量与筛选后计数', () => {
@@ -512,10 +514,18 @@ describe('views: 需求台账主行表格', () => {
     expect(html).toContain('待排期');
   });
 
-  it('未填写描述与文档时显示占位符，不留空白', () => {
+  it('未填写文档时显示占位符，不留空白', () => {
     const html = renderReqView(null, makeReqCtx());
-    expect(html).toContain('req-desc');
     expect(html).toContain('req-doc-empty');
+  });
+
+  it('有文档时渲染可点开的文字链接（不是图标）', () => {
+    const ctx = makeReqCtx();
+    ctx.state.modules[0].docUrl = 'https://example.feishu.cn/docx/abc';
+    const html = renderReqView(null, ctx);
+    expect(html).toContain('class="req-doc"');
+    expect(html).toContain('需求文档');
+    expect(html).toContain('rel="noopener noreferrer"');   // 外链必须带 noopener
   });
 
   it('筛选后计数反映筛选结果', () => {
@@ -815,15 +825,16 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect(html).toContain('req-muted">—');
   });
 
-  it('列头数与主行单元格数一致（12 列，防止加列时只改一半）', () => {
+  it('列头数与主行单元格数一致（11 列，防止加列时只改一半）', () => {
+    // 从 12 列收到 11 列：删掉「描述」列（描述收进展开档案，主行只留文档入口）
     const ctx = makeReqCtx();
     ctx.state.modules = [{ name: '单条', bars: [] }];
     const html = renderReqView(null, ctx);
     const thead = html.slice(html.indexOf('<thead>'), html.indexOf('</thead>'));
     const tbody = html.slice(html.indexOf('<tbody>'), html.indexOf('</tbody>'));
     // 用 /<th[\s>]/ 而不是 /<th/：后者会把 <thead> 也算成一个列头
-    expect((thead.match(/<th[\s>]/g) || []).length).toBe(12);
-    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(12);
+    expect((thead.match(/<th[\s>]/g) || []).length).toBe(11);
+    expect((tbody.match(/<td[\s>]/g) || []).length).toBe(11);
   });
 
   it('筛选条有生命周期下拉，含四档选项与「未设置」', () => {
