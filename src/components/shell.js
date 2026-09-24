@@ -345,7 +345,7 @@ ${mobileSheetHTML()}
     <div class="f-row"><label>需求颜色<span class="phase-tip">同一需求的任务条 / 里程碑统一用它</span></label><input type="color" id="newModTagc" value="#3b82f6"><span class="phase-tip" id="newModTagcTip" style="margin-left:0"></span></div>
     <div class="f-row">
       <label>提出人<span class="phase-tip">可选已有提出人，也可直接输入新的</span></label>
-      <input type="text" id="newModProposedBy" list="modProposerList" placeholder="如：业务方张三">
+      <input type="text" id="newModProposedBy" list="modProposerList">
       <datalist id="modProposerList"></datalist>
     </div>
     <div class="f-row">
