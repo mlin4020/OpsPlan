@@ -112,6 +112,16 @@ function lifecycleSelect(name, cur) {
     + ` title="直接改生命周期（人工维护，与左侧自动计算的「状态」不是一回事）">${opts}</select>`;
 }
 
+// 操作列图标：内联 SVG 而不是 emoji / Unicode 符号。
+// emoji（如 🗄）在不同系统会渲成彩色字形且大小不一；✎ ✕ 这类符号在不同字体下
+// 粗细也对不齐。SVG 用 stroke=currentColor 跟随文字色，hover 与 danger 变色时自动同步。
+const ICON = {
+  edit: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg>',
+  archive: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8M10 12h4"/></svg>',
+  restore: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8"/><path d="M3 3v5h5"/></svg>',
+  del: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>'
+};
+
 // 关键时间：需求确认 / 提测两个卡点的日期（不新增字段，实时读排期里程碑）
 // 口径见 core/mod-tag.js 的 findGateMs：提测只能按 label 认，不能判 p='sit'
 function gateCell(mo) {
@@ -174,9 +184,9 @@ function rowHtml(mo, ctx) {
     <td class="req-c-gate">${gateCell(mo)}</td>
     <td class="req-c-ship">${shipCell(ship)}</td>
     <td class="req-ops req-act">
-      <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">✎</button>
-      <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? '↩' : '🗄'}</button>
-      <button type="button" class="ico-btn danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}" title="删除需求" aria-label="删除需求">✕</button>
+      <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">${ICON.edit}</button>
+      <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? ICON.restore : ICON.archive}</button>
+      <button type="button" class="ico-btn danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}" title="删除需求" aria-label="删除需求">${ICON.del}</button>
     </td>
   </tr>`;
 }
