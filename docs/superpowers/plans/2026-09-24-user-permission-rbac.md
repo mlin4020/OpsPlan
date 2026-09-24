@@ -13,6 +13,8 @@
 ## Global Constraints
 
 - **判定真源**：设计文档 §5.2。改动必须**同时**落到 `src/utils/permission.js` 与 `deploy/supabase/migration.sql` 的 `assert_plan_editable`。两份不一致 = "前端能填、保存被拒"，是本次最大风险。
+- **身份映射只有一处**：`resolveAccess`（谁是什么身份）。`ctxOf` 是 `userStore.state → ctx` 的**适配层**，带刻意的向后兼容兜底 —— **不要拿它断言身份**（测试里断言"没配人名 ⇒ 只读"必须用 `resolveAccess` 现算，用 `ctxOf` 会测到兜底行为）。
+- **不测不可达状态**：不要手写真源产生不出来的 fixture（例如 `{ access:'collab', rname:'' }` —— `collab` 的定义就含"人名非空"）。这类断言测不到生产不变量，还会与判定函数的语义打架。
 - **四种身份**：`access = 'full' | 'collab' | 'readonly'`。`full = role==='admin' || isOwner`；`collab = 已登录 且 resource_name 非空`；其余 `readonly`。
 - **任务归属**：`taskMine(t) = t.res 是空数组 || rname ∈ t.res`。`res` **不是数组**（里程碑）时**返回 false**，走里程碑分支。
 - **需求归属**：`modMine(mo) = mo.owner === rname`。`mo.owner` 缺失 = 无主。
@@ -99,6 +101,13 @@ export function ctxOf(state) {
     : (s.access === ACCESS.COLLAB || s.access === ACCESS.FULL) ? s.access : ACCESS.FULL;
   return { access, rname: s.resourceName || '', role: s.role || 'user' };
 }
+
+// ⚠️ 别把 ctxOf 当成"身份映射"用。它是 userStore.state → ctx 的**适配层**：
+//   身份映射（谁是什么身份）只有 resolveAccess 一处；
+//   ctxOf 的 `else ACCESS.FULL` 是刻意的向后兼容兜底 —— 它只在 `readonly === false`
+//   时够得到，而放权任务（Task 9）之前 main-gantt 对"非 owner 非 admin"一律
+//   `readonly: true`，所以那一支在生产里到不了。
+//   拿 ctxOf 去断言"没配人名 ⇒ 只读"会测到兜底行为而不是身份映射 —— 测试里要用 resolveAccess 现算。
 
 export const isFull = ctx => !!ctx && ctx.access === ACCESS.FULL;
 const isCollab = ctx => !!ctx && ctx.access === ACCESS.COLLAB;
@@ -202,17 +211,21 @@ describe('ctxOf 向后兼容', () => {
 });
 
 describe('没配对应人员 ⇒ 只读 ⇒ 一切写权限为假', () => {
-  // 这条不变量必须现算，不能手写常量：collab 的定义里就含"人名非空"，
-  // 手写一个 collab+空人名 的 ctx 等于在测一个不可达状态（见文件顶部注释）。
+  // ⚠️ 必须用 `resolveAccess`（身份映射的真源）现算，**不能用 `ctxOf`**。
+  //   ctxOf 是 `userStore.state → ctx` 的适配层，它对"未显式给 access 且非只读"
+  //   有一个刻意的向后兼容兜底（返回 'full'，为了让「守卫改造」先于「放权」上线时零行为变化）。
+  //   拿 ctxOf 去断言"没人名 ⇒ 只读"，测到的是那个兜底行为，不是身份映射 —— 两者不是一回事。
+  //   手写常量（旧版的 NO_NAME）或误用适配层（本节的初版），都会造出真源产生不出来的状态。
   it('resolveAccess 把"有人名之外的一切"都落到只读', () => {
     expect(resolveAccess({ role: 'user', resourceName: '' })).toBe(ACCESS.READONLY);
     expect(resolveAccess({ role: 'user', resourceName: '   ' })).toBe(ACCESS.READONLY);
     expect(resolveAccess({ role: 'user' })).toBe(ACCESS.READONLY);
   });
 
-  it('即使把一个空人名的 ctx 传进来（防御性），也不该放行任何写权限', () => {
-    const anon = ctxOf({ readonly: false, resourceName: '' });
-    expect(anon.access).toBe(ACCESS.READONLY);
+  it('由真源派生的「人名缺失」ctx：一切写权限为假', () => {
+    const access = resolveAccess({ role: 'user', resourceName: '' });
+    const anon = { access, rname: '', role: 'user' };
+    expect(access).toBe(ACCESS.READONLY);
     expect(canEditTask({ res: [] }, anon)).toBe(false);        // 连"未分配可认领"也不给
     expect(canEditTask({ res: ['张三'] }, anon)).toBe(false);
     expect(canEditModuleFields(anon)).toBe(false);
@@ -323,7 +336,7 @@ describe('其余判定', () => {
 - [ ] **Step 3: 跑测试确认通过**
 
 Run: `npx vitest run tests/permission.test.js`
-Expected: PASS（约 27 个用例）
+Expected: PASS（22 个用例。**不要**照旧版简报写的"约 27"去凑数——那是初版的估算，`NO_NAME` 那 3 条删掉、新增 2 条之后就是 22）
 
 - [ ] **Step 4: 跑全量测试确认没有影响既有用例**
 
