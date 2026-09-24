@@ -889,7 +889,13 @@ export function listResourceNames() { return call('listResourceNames'); }
 
 - [ ] **Step 2: Supabase 后端实现**
 
-`src/services/backends/supabase.js`，把 `setAdmin` 替换为：
+**先补一个漏掉的字段**：`src/services/backends/supabase.js` 的 `listUsers`（现 `:67-74`）select 是 `'id,display_name,role,created_at'`，**没有 `resource_name`**。Step 5 要渲染它来做「未指定」徽标，不加的话**徽标会永远显示、漏配发现机制直接失效**：
+
+```js
+      .select('id,display_name,role,resource_name,created_at')
+```
+
+然后把 `setAdmin` 替换为：
 
 ```js
   // 编辑用户：只允许改这三个字段 —— role 与 resource_name 由服务端的
@@ -919,6 +925,8 @@ export function listResourceNames() { return call('listResourceNames'); }
 - [ ] **Step 3: 飞书后端对齐（仅签名与字段，不做校验）**
 
 `src/services/backends/feishu.js`：把 `setAdmin(userId, isAdmin)` 改名为 `updateProfile(userId, patch)`，内部按 `patch.role === 'admin'` 推断 `isAdmin`，并透传 `display_name`；`listResourceNames` 直接返回 `{ data: [], error: null }` 并在注释里写明"飞书模式不提供候选，靠人工填写"。
+
+同时检查 `listUsers`（现 `:81-85`）与 `listUserOptions` 的返回映射，**确保 `resource_name` 被透出**——飞书那边它是人员表的一个字段，取不到就返回空串（而不是 `undefined`），否则 Step 5 的「未指定」徽标逻辑要额外防 `undefined`。
 
 - [ ] **Step 4: `index.html` 加编辑用户弹窗**
 
@@ -1173,7 +1181,7 @@ async function saveEditProj() {
 
 ```bash
 git add src/main-index.js
-git commit -m "feat(项目): 所属人可管理自己的项目（改名/换负责人/周期），删除仍仅管理员"
+git commit -m "feat(项目): 所属人可管理自己的项目（改名/换负责人），删除仍仅管理员"
 ```
 
 ---
@@ -1351,13 +1359,19 @@ git commit -m "chore(权限): 重建导出模板并补充权限模型与首次�
 -- 因此：不回填、handle_new_user 不写、只有管理员能写。
 alter table public.profiles add column if not exists resource_name text;
 
--- ---------- 5.2 敏感字段守卫 ----------
--- 修既有漏洞：profiles_update 策略只写了 using、没写 with check，
+-- ---------- 5.2 敏感字段守卫（UPDATE 与 INSERT 两条路都要堵） ----------
+--
+-- 修 UPDATE 路径的既有漏洞：profiles_update 策略只写了 using、没写 with check，
 -- using 只回答"哪些行你能改"、不限制能改哪一列。于是任何登录用户都能：
 --   PATCH /rest/v1/profiles?id=eq.<自己>  { "role": "admin" }
 --   PATCH /rest/v1/profiles?id=eq.<自己>  { "resource_name": "张三" }
 --
--- 必须用触发器而不是 RLS 的 with check：with check 无法引用 OLD，
+-- 同时堵 INSERT 路径：profiles_insert 策略是 with check (auth.uid() = id)，
+-- 只限定了"只能插自己那行"，没限定字段。所以当自己的 profile 行不存在时
+-- （管理员删过 / 异常），可以直接 INSERT 一行把 role 写成 'admin'。
+-- 同一个触发器一并挡住 —— 两条路径是同一类问题。
+--
+-- 必须用触发器而不是 RLS 的 with check：UPDATE 的 with check 无法引用 OLD，
 -- 在策略里查同表还会有可见性 / 竞态问题。
 create or replace function public.guard_profile_sensitive()
 returns trigger
@@ -1365,10 +1379,18 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if (new.role is distinct from old.role
-      or new.resource_name is distinct from old.resource_name)
-     and not public.is_admin() then
-    raise exception '仅管理员可修改角色与对应人员' using errcode = '42501';
+  if tg_op = 'INSERT' then
+    -- 新行一律按最小权限落地：非管理员不能给自己写 role / resource_name
+    if not public.is_admin() then
+      new.role := 'user';
+      new.resource_name := null;
+    end if;
+  else
+    if (new.role is distinct from old.role
+        or new.resource_name is distinct from old.resource_name)
+       and not public.is_admin() then
+      raise exception '仅管理员可修改角色与对应人员' using errcode = '42501';
+    end if;
   end if;
   return new;
 end;
@@ -1376,7 +1398,7 @@ $$;
 
 drop trigger if exists profiles_guard_sensitive on public.profiles;
 create trigger profiles_guard_sensitive
-  before update on public.profiles
+  before insert or update on public.profiles
   for each row execute function public.guard_profile_sensitive();
 ```
 
@@ -1422,6 +1444,26 @@ await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + MY_UID, {
 
 用管理员账号把某个普通账号设为 `admin` / 设置 `resource_name = '张三'`。
 预期：成功。
+
+- [ ] **Step 6b: 手工验证 —— INSERT 路径同样被堵**
+
+用一个"profile 行已被删掉"的账号（测试环境可让管理员先 `delete from profiles where id = '<该用户>'`），带该用户的 token 执行：
+
+```js
+await fetch(SUPABASE_URL + '/rest/v1/profiles', {
+  method: 'POST',
+  headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + MY_TOKEN,
+             'Content-Type': 'application/json', Prefer: 'return=representation' },
+  body: JSON.stringify({ id: MY_UID, display_name: '我', role: 'admin', resource_name: '张三' })
+}).then(r => r.json());
+```
+预期：**插入成功，但 `role` 被强制成 `user`、`resource_name` 被强制成 `null`**（触发器静默改写，不是报错——INSERT 路径用改写而不抛错，是为了不破坏 `handle_new_user()` 之外可能存在的自建 profile 流程）。
+
+再查一次确认：
+```sql
+select id, display_name, role, resource_name from public.profiles where id = '<该用户>';
+```
+预期：`role = 'user'`、`resource_name = null`。
 
 - [ ] **Step 7: 提交**
 
@@ -1548,11 +1590,13 @@ declare
   v_pin_ok      text[];
   v_moved       text[];
 begin
-  -- (1) 项目周期：协作者不可变（所属人/管理员走快路径，到不了这里）
-  if (p_old->>'start') is distinct from (p_new->>'start')
-     or (p_old->>'end') is distinct from (p_new->>'end') then
-    raise exception '无权修改项目周期' using errcode = '42501';
-  end if;
+  -- (1) 项目周期（start/end）刻意**不校验** —— 它是派生数据，不是用户动作。
+  --   cycle.apply() 每次保存都按任务日期重算 start=min(s,m) / end=max(e,m) 并写回 state
+  --   （src/scheduler/cycle.js:18-44；由 scheduler/index.js:88 的 ctx.save 调用，
+  --    加载时 plan-sync.js:48 也会重算一次）。UI 里已无「周期」入口。
+  --   若在这里要求 start/end 不可变，协作者改一次期就会被自己引发的派生写入拒掉 —— 功能直接不可用。
+  --   残留风险（已接受）：协作者可伪造成假值，但下次加载即被任务日期覆盖，
+  --   仅影响 hero 副标题的一行显示，无实质影响。
 
   -- (2) 资源库整体不可变
   if coalesce(p_old->'resources','[]'::jsonb) is distinct from coalesce(p_new->'resources','[]'::jsonb) then
@@ -1861,9 +1905,9 @@ begin
   n := jsonb_set(b, '{resources}', '[]');
   raise notice '13 改资源库             → %', public.t_try(b, n, '张三');
 
-  -- 14 改项目周期 → REJECT
+  -- 14 伪造项目周期 → PASS（start/end 是派生数据，服务端刻意不校验，见函数内注释）
   n := jsonb_set(b, '{end}', '"2026-11-30"');
-  raise notice '14 改项目周期           → %', public.t_try(b, n, '张三');
+  raise notice '14 伪造项目周期         → %', public.t_try(b, n, '张三');
 
   -- 15 删版本 → REJECT
   n := jsonb_set(b, '{versions}', '[]');
@@ -1898,7 +1942,7 @@ drop function if exists public.t_try(jsonb, jsonb, text);
 | 11 | 归档他人需求 | REJECT |
 | 12 | 改他人需求字段 | PASS |
 | 13 | 改资源库 | REJECT |
-| 14 | 改项目周期 | REJECT |
+| 14 | 伪造项目周期 | **PASS**（`start`/`end` 是 `cycle.apply()` 每次保存都重算的派生数据，不校验；这是刻意的，不要"修"成 REJECT——那会让协作者所有改期都被拒） |
 | 15 | 删版本 | REJECT |
 | 16 | 版本机制改上线里程碑 | PASS |
 | 17 | 手改他人上线里程碑 | REJECT |
@@ -3103,12 +3147,7 @@ describe('readonly: 按钮分组', () => {
 Run: `npx vitest run tests/components.test.js -t "按钮分组"`
 Expected: FAIL —— `FULL_ONLY_BTN_IDS` 未导出
 
-- [ ] **Step 3: 先找到「周期」按钮的 id**
-
-Run: `grep -n "周期" src/components/shell.js`
-记下按钮 id（下文记作 `CYCLE_BTN_ID`），把它加入 `FULL_ONLY_BTN_IDS`。
-
-- [ ] **Step 4: 改 `src/utils/readonly.js`**
+- [ ] **Step 3: 改 `src/utils/readonly.js`**
 
 把 `EDIT_BTN_IDS`（现 `:16-19`）替换为：
 
@@ -3126,7 +3165,7 @@ export const READONLY_BTN_IDS = [
 //   btnImport    整份替换 modules + resources + versions
 //   btnResLib    资源库改名会级联重写全项目任务里的人名
 //   CYCLE_BTN_ID 项目周期属于项目级元数据
-export const FULL_ONLY_BTN_IDS = ['btnAutoPlan', 'btnUndo', 'btnRedo', 'btnImport', 'btnResLib', 'CYCLE_BTN_ID'];
+export const FULL_ONLY_BTN_IDS = ['btnAutoPlan', 'btnUndo', 'btnRedo', 'btnImport', 'btnResLib'];
 ```
 
 并把 `refreshUI` 替换为：
@@ -3155,7 +3194,7 @@ function refreshUI(doc) {
 
 顶部 import 追加 `import { ctxOf } from './permission.js';`
 
-- [ ] **Step 5: 确认 `refreshUI` 在 access 就绪后被调用**
+- [ ] **Step 4: 确认 `refreshUI` 在 access 就绪后被调用**
 
 `refreshUI` 由 `enterReadonly` / `leaveReadonly` 触发。检查 `src/main-gantt.js` 的 `initProject()`：`userStore.set({ isOwner, access, readonly })` 之后才 `wireUI()`（内部会走只读初始化）。
 **若只读未触发（协作者不 readonly），`refreshUI` 不会被调用 → `FULL_ONLY` 按钮不会灰化。** 在 `initProject` 里 `userStore.set({...})` 之后补一行显式刷新：
@@ -3169,12 +3208,12 @@ import { refreshUI as refreshReadonlyUI } from './utils/readonly.js';
 
 （为此在 `src/utils/readonly.js` 里把 `refreshUI` 导出：`export function refreshUI(doc) {...}`。）
 
-- [ ] **Step 6: 跑测试 + 全量**
+- [ ] **Step 5: 跑测试 + 全量**
 
 Run: `npx vitest run tests/components.test.js && npm test`
 Expected: PASS
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
 git add src/utils/readonly.js src/main-gantt.js tests/components.test.js
