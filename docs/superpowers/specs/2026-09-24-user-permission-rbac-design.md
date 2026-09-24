@@ -419,6 +419,78 @@ assertEditable(throwing, target)
 
 CSS 侧沿用现有约定：`readonly-mode` 类（`src/styles/gantt.css:1034,1171-1172,1212`）继续只管"完全只读"。
 
+### 9.1 资源工作视图：编辑自己的任务进度（2026-09-24 追加需求）
+
+**范围**：只做**资源工作视图**（`work` 视图 / `src/views/work-view.js`）。
+**不做**「工作组规划器」（`res` 视图 / `src/views/res-view.js`）——那才是"时间轴视角"（见 `work-view.js:5` 的文件头对比说明），本次不在范围。
+
+#### 背景：为什么必须新写一条 mutation
+
+- 进度字段是 `t.done`。`saveTask()` 的**编辑分支不写 `done`**（`t.done = committed.done`，从既有值继承）
+- 现有唯一改 `done` 的路径是右键菜单的 `saveTask(id, { complete: true })`，它只会把 `done` 设成 **100**，**表达不了"我现在 40%"**
+
+因此新增专用 mutation：
+
+```
+setProgress(taskId, pct)
+  · pct 归一化：Math.max(0, Math.min(100, Math.round(Number(pct))))，非数值 → 直接 return
+  · 守卫：assertEditable(false, { kind:'task', task })   ← 走任务级归属判定
+  · 只写 t.done，不触发重排（改进度不影响日期，不需要 recomputeAffected）
+  · ctx.save() → 落到撤销栈，可 Ctrl+Z 撤销
+```
+
+并把它加进 §8.3 的 `target` 映射表：`{ kind:'task', task: findRawBar(taskId) }`。
+
+#### 本页的可编辑口径（比全局更窄，刻意如此）
+
+```
+本页可编辑进度 ⟺ access === 'full'
+                || (access === 'collab' && t.res 含我的人名)
+```
+
+| 身份 | 本页可编辑的行 |
+|---|---|
+| 管理员 / 所属人（full） | 所有任务行（含未分配） |
+| 协作者（collab） | **只有 `res` 含自己人名的行** |
+| 只读 / 游客 | 无 |
+
+**与全局口径的差异（必须记住）**：全局 §5.2 里「未分配任务 = 待认领，协作者可编辑」，但**本页对未分配任务只读**。理由：本页是"我的活儿清单"（按人分块），不是认领板；认领请去甘特图。
+
+推论有两条，都是刻意的：
+1. 本页的「未分配」区块退化为**纯展示**（能看到有活没人干，但要动手得去甘特图）
+2. **服务端会放行、只是本页不给入口**——`assert_plan_editable` 的"修改"分支用 `bar_owned()`，它对 `res:[]` 返回 true。这是"前端比服务端更严"，方向安全，但**不要**因此误判服务端漏判
+
+#### 交互形态：点击输入（不做拖拽）
+
+选点击而非拖拽的直接原因：进度条填充宽 = `${pct}%`（`work-view.js:116`），**`pct = 0` 时填充宽 0，拖拽没有任何可命中的元素**；且轨道仅约 60px 宽，拖一下 2% 一跳、手机上拖不准。改成点整格后这两个问题一并消失。
+
+```
+点「进度」格（整格 .rwk-prog，含百分比文字）
+  → 就地弹出小弹层：
+      数字输入（0–100 整数）
+      档位按钮：0% / 25% / 50% / 75% / 100%
+      步进按钮：−5% / +5%
+      保存 / 取消
+  → Enter 保存、Esc 取消、点击外部关闭
+  → 保存即 setProgress(taskId, pct)
+```
+
+- 不可编辑的行：**不渲染任何编辑入口**（不加 `data-wk-prog` 属性、`cursor` 也不变 pointer），从 DOM 层面保证点不动
+- 弹层按钮最小 40px 触摸高度（手机可点）
+- 状态徽标不用单独做：状态由 `done` + 日期推导（`core/task-status.js`），改 `done` 会同时带动进度条与状态徽标
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|---|---|
+| `src/scheduler/mutations.js` | 新增 `setProgress`；加进导出清单 |
+| `src/scheduler/index.js` | 挂到 `sched.setProgress` |
+| `src/views/work-view.js` | `taskRow()` 给可编辑行加 `data-wk-prog` 标记与当前 `done` |
+| `src/components/work-task.js` | **新增**：进度弹层的绑定与提交（照 `work-filter.js` 的委托模式） |
+| `src/components/index.js` | 挂载 `bindWorkTask(deps)` |
+| `src/styles/gantt.css` | 进度格可点击态 + 弹层样式 |
+| `tests/` | `setProgress` 的归一化与守卫；本页可编辑口径；弹层提交 |
+
 ---
 
 ## 10. 用户管理与项目页

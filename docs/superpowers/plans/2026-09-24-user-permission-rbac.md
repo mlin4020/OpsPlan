@@ -31,10 +31,12 @@
 |---|---|---|
 | MR1 权限地基 | Task 1–2 | 纯新增，零行为变化 |
 | MR2 服务端 | Task 3–6 | owner/admin 走 RPC 快路径，行为不变；协作者仍全局只读 |
-| MR3 守卫 | Task 7–9 | 守卫就位但仍不放权，零行为变化 |
-| MR4 放权 | Task 10 | 协作者开始可写 |
-| MR5 界面收敛 | Task 11–15 | 界面与规则一致 |
-| MR6 用户与项目 | Task 16–18 | 可运维、可交付 |
+| MR3 守卫 | Task 7、7b、8 | 守卫就位但仍不放权，零行为变化 |
+| MR4 放权 | Task 9 | 协作者开始可写 |
+| MR5 界面收敛 | Task 10、11、12、12b | 界面与规则一致 |
+| MR6 用户与项目 + 收尾 | Task 13–15 | 可运维、可交付 |
+
+共 **17 个任务**（Task 7b / 12b 是 2026-09-24 追加需求「资源工作视图支持编辑自己的任务进度」插入的两条，见 spec §9.1）。
 
 **MR2 必须先于 MR4**：否则协作者在前端获准编辑、却被 RLS 拒绝保存。
 
@@ -586,6 +588,271 @@ git commit -m "feat(权限): 需求弹窗支持归属转交，台账/版本页/�
 
 ---
 
+### Task 12b: 资源工作视图的进度编辑（界面）
+
+> **插入位置**：紧跟 Task 12，属于 MR5。设计见 spec §9.1；数据层见 Task 7b。
+> **范围**：只做**资源工作视图**（`work` 视图）。「工作组规划器」（`res` 视图，时间轴视角）**不在本次范围**。
+
+**Files:**
+- Modify: `src/views/work-view.js`（`taskRow` 的进度格加编辑标记；`renderWorkView` 注入 `canEdit`）
+- Create: `src/components/work-task.js`
+- Modify: `src/components/index.js`（挂载 `bindWorkTask`）
+- Modify: `src/main-gantt.js`（`baseCtx` 注入 `canEditProgress`）
+- Modify: `src/styles/gantt.css`
+- Test: `tests/work-view.test.js`（新增用例）
+
+**Interfaces:**
+- Consumes: Task 7b 的 `sched.setProgress(taskId, pct)`；Task 1 的 `ctxOf`
+- Produces:
+  - `ctx.canEditProgress(t) => boolean`（由入口注入，**不注入时视图一律按不可编辑**）
+  - `deps.canEdit(t)`（视图内传给 `taskRow`）
+  - `bindWorkTask(deps) => { close }`
+
+- [ ] **Step 1: 视图侧：可编辑的行才带编辑标记**
+
+`src/views/work-view.js` 的 `taskRow()`，把进度格那一行（现 `:116`）替换为：
+
+```js
+  // 进度格：只有可编辑的行才带 data-wk-prog。
+  // 不可编辑的行连属性都不渲染 —— 从 DOM 层面保证点不动，
+  // 而不是"渲染了再在事件里判断后 return"（后者留下一个假的可点区域，用户会反复点）
+  const canEdit = typeof deps.canEdit === 'function' && deps.canEdit(t);
+  return `<div class="rwk-row">
+    …
+    <span class="rwk-prog${canEdit ? ' is-edit' : ''}"${
+      canEdit ? ` data-wk-prog="${esc(t.id)}" data-wk-done="${pct}" role="button" tabindex="0"` : ''
+    } title="${canEdit ? '点击修改完成度' : `完成度 ${pct}%`}"><span class="rwk-bar"><i style="width:${pct}%;background:${fill}"></i></span><b class="rwk-pct">${pct}%</b></span>
+  </div>`;
+```
+
+`renderWorkView()` 里构造 `deps` 时（现 `:174`）加上 `canEdit`：
+
+```js
+  // 可编辑口径由入口注入（spec §9.1）：full 全部 · collab 只有 res 含自己 · 未注入一律 false。
+  // 刻意走 ctx 注入而不是在视图里 import userStore：
+  //   视图要保持可脱离浏览器渲染（导出单文件就没有 userStore），不注入即安全只读
+  const canEditProgress = typeof ctx.canEditProgress === 'function' ? ctx.canEditProgress : () => false;
+  const deps = { modPri, modColors: ctx.modColors, filter, canEdit: canEditProgress };
+```
+
+- [ ] **Step 2: 入口注入 `canEditProgress`**
+
+`src/main-gantt.js` 的 `baseCtx`（现 `:111-121`）里加：
+
+```js
+    // 资源工作视图的进度编辑口径（spec §9.1）：
+    //   full  → 所有行（含未分配）
+    //   collab → 只有 res 含我名字的行
+    //   readonly → 无
+    // 刻意比全局口径更窄：未分配任务在本页只读（认领请去甘特图）。
+    // 注意这是"前端比服务端更严"：服务端 bar_owned 对 res:[] 是放行的，别误判成服务端漏判。
+    canEditProgress: t => {
+      const c = ctxOf(userStore.state);
+      if (c.access === 'full') return true;
+      if (c.access !== 'collab') return false;
+      return !!t.res && t.res.includes(c.rname);
+    },
+```
+
+`main-gantt.js` 顶部 import 追加 `ctxOf`：
+```js
+import { resolveAccess, ACCESS, ctxOf } from './utils/permission.js';
+```
+
+`src/main-standalone.js` **不要**注入（导出件没有 userStore，不注入即自动只读）—— 这也是必须走注入而不是视图内 import 的原因。
+
+- [ ] **Step 3: 新建 `src/components/work-task.js`**
+
+```js
+// ============================================================
+// components/work-task.js — 资源工作视图：点击修改任务完成度
+//
+// 为什么单独成模块（不塞进 work-filter.js）：
+//   work-filter 管"看哪些"，这里管"改什么"，两件事生命周期完全不同 ——
+//   筛选器只在筛选条上委托；本模块要弹层、要读权限、要提交 mutation。
+//
+// 为什么不做拖拽（spec §9.1）：
+//   进度条填充宽 = pct%，pct=0 时没有任何可命中元素；轨道仅约 60px 宽，
+//   拖一下 2% 一跳、手机上拖不准。改成"点整格 + 弹层输入"两个问题一并消失。
+// ============================================================
+import { $ } from '../utils/dom.js';
+
+const PRESETS = [0, 25, 50, 75, 100];   // 档位
+const STEP = 5;                         // 步进幅度
+
+export function bindWorkTask(deps) {
+  const g = deps.gantt;
+  if (!g || typeof g.addEventListener !== 'function') return null;
+
+  const doc = deps.doc;
+  let pop = null;      // 弹层根元素
+  let curId = null;    // 正在编辑的任务 id
+
+  function close() {
+    if (pop && pop.parentNode) pop.parentNode.removeChild(pop);
+    pop = null;
+    curId = null;
+  }
+
+  function commit(pct) {
+    if (!curId) return;
+    const v = deps.sched.setProgress(curId, pct);
+    if (v === null) {
+      // 被守卫拦下（权限变了 / 任务被删 / 里程碑）：给出明确原因，别让它静默失败
+      if (deps.onSyncStatus) deps.onSyncStatus('fail', { msg: '无法修改该任务的完成度' });
+      close();
+      return;
+    }
+    close();
+    deps.render();        // 进度条与状态徽标一起更新（状态由 done 推导）
+    if (deps.onSyncStatus) deps.onSyncStatus('ok', { msg: `完成度已更新为 ${v}%` });
+  }
+
+  function open(cell) {
+    curId = cell.dataset.wkProg;
+    let val = Math.max(0, Math.min(100, parseInt(cell.dataset.wkDone || '0', 10) || 0));
+    const rect = cell.getBoundingClientRect();
+
+    pop = doc.createElement('div');
+    pop.className = 'wkp';
+    pop.innerHTML =
+      '<div class="wkp-h">完成度</div>' +
+      '<div class="wkp-row"><input class="wkp-n" type="number" min="0" max="100" step="1" value="' + val + '"><b>%</b>' +
+        '<button type="button" class="wkp-b" data-wkp-dial="-1">−' + STEP + '</button>' +
+        '<button type="button" class="wkp-b" data-wkp-dial="1">+' + STEP + '</button></div>' +
+      '<div class="wkp-presets">' +
+        PRESETS.map(p => '<button type="button" class="wkp-b" data-wkp-set="' + p + '">' + p + '%</button>').join('') +
+      '</div>' +
+      '<div class="wkp-foot"><button type="button" class="wkp-b primary" data-wkp-ok>保存</button>' +
+        '<button type="button" class="wkp-b" data-wkp-cancel>取消</button></div>';
+    doc.body.appendChild(pop);
+    // 贴在进度格下方；靠近屏幕右/下边缘时回收，避免被裁掉
+    const w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(rect.left, doc.documentElement.clientWidth - w - 8)) + 'px';
+    pop.style.top = Math.min(rect.bottom + 6, doc.documentElement.clientHeight - h - 8) + 'px';
+
+    const input = pop.querySelector('.wkp-n');
+    const clamp = () => {
+      const n = parseInt(input.value, 10);
+      return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : val;
+    };
+    pop.querySelectorAll('[data-wkp-set]').forEach(b => b.addEventListener('click', () => {
+      val = parseInt(b.dataset.wkpSet, 10); input.value = val;
+    }));
+    pop.querySelectorAll('[data-wkp-dial]').forEach(b => b.addEventListener('click', () => {
+      val = clamp() + STEP * parseInt(b.dataset.wkpDial, 10); val = Math.max(0, Math.min(100, val));
+      input.value = val;
+    }));
+    pop.querySelector('[data-wkp-ok]').addEventListener('click', () => commit(clamp()));
+    pop.querySelector('[data-wkp-cancel]').addEventListener('click', close);
+    // Enter 保存 / Esc 取消：这是"快改一条再下一条"的场景，键盘路径必须顺手
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(clamp()); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+    input.focus();
+    input.select();
+  }
+
+  g.addEventListener('click', e => {
+    const cell = e.target.closest && e.target.closest('[data-wk-prog]');
+    if (!cell) {
+      // 点弹层内部不关（上面的按钮各自处理），点外部才关
+      if (pop && !(e.target.closest && e.target.closest('.wkp'))) close();
+      return;
+    }
+    if (pop && curId === cell.dataset.wkProg) { close(); return; }   // 再点同一格 = 收起
+    close();
+    open(cell);
+  });
+
+  return { close };
+}
+```
+
+- [ ] **Step 4: 挂载**
+
+`src/components/index.js`：照 `bindWorkFilter` 的模式
+
+```js
+import { bindWorkTask } from './work-task.js';
+// …在 const workFilter = bindWorkFilter(deps); 之后…
+  // 资源工作视图的进度编辑（点击弹层）。与 workFilter 同属 work 视图，
+  // 但一个管"看哪些"、一个管"改什么"，故分开两个模块
+  const workTask = bindWorkTask(deps);
+```
+
+并在返回对象里加 `workTask,`。
+
+- [ ] **Step 5: 样式**
+
+`src/styles/gantt.css` 追加：
+
+```css
+/* 资源工作视图：进度格可点击态（不可编辑的行不加 .is-edit，光标也就不变） */
+.rwk-prog.is-edit{cursor:pointer;border-radius:4px;transition:background .15s}
+.rwk-prog.is-edit:hover{background:var(--accent-soft)}
+.rwk-prog.is-edit:focus-visible{outline:2px solid var(--accent-ring);outline-offset:1px}
+
+/* 进度编辑弹层（移动端按钮保持 ≥40px 触摸高度） */
+.wkp{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 10px 30px rgba(15,23,42,.18);padding:10px 12px;min-width:196px}
+.wkp-h{font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px}
+.wkp-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.wkp-n{width:62px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;font-family:inherit}
+.wkp-presets{display:flex;gap:6px;margin-bottom:8px}
+.wkp-b{min-height:34px;min-width:34px;padding:6px 9px;font-size:12px;border:1px solid var(--line);
+  background:#fff;border-radius:7px;cursor:pointer;font-family:inherit;color:#334155}
+.wkp-b:hover{border-color:var(--accent);color:var(--accent)}
+.wkp-b.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.wkp-foot{display:flex;gap:6px;justify-content:flex-end}
+@media(max-width:640px){ .wkp-b{min-height:40px;padding:8px 12px;font-size:13px} .wkp-n{min-height:40px} }
+```
+
+- [ ] **Step 6: 视图测试**
+
+`tests/work-view.test.js` 追加：
+
+```js
+describe('work-view: 进度编辑标记', () => {
+  it('注入 canEditProgress 时，可编辑的行带 data-wk-prog', () => { /* 断言渲染结果含 data-wk-prog="<id>" */ });
+  it('未注入 canEditProgress 时一行都不带（导出件安全只读）', () => { /* 断言渲染结果不含 data-wk-prog */ });
+  it('canEdit 返回 false 的行不带 data-wk-prog', () => { /* 用 () => false 注入 */ });
+  it('pct = 0 的行仍然可点（编辑标记与填充宽无关）', () => { /* done=0 且 canEdit=true → 仍带属性 */ });
+});
+```
+（按 `tests/work-view.test.js` 里既有用例的方式构造 `ctx` 与 `state`，断言渲染出的 HTML 字符串。）
+
+- [ ] **Step 7: 跑测试 + 手工验证**
+
+Run: `npm test`
+
+手动（协作者账号，`resourceName = 张三`）：
+
+| 场景 | 预期 |
+|---|---|
+| 资源工作视图，点自己任务的进度格 | 弹出输入层，默认值 = 当前百分比 |
+| 输入 40 → 保存 | 进度条变 40%，提示"完成度已更新为 40%"。**状态徽标按 `taskStatus` 重算**：`done>=100` → 已完成；否则结束日已过且有人负责 → 已逾期；否则今日落在 `[s,e]` 内 → 进行中；否则未开始（`core/task-status.js:62-71`）。所以改到 40 不一定显示"进行中"，取决于该任务的日期区间——**别把这条当成失败** |
+| 输入 100 → 保存 | 进度条满格，状态**一定**变「已完成」（`done>=100` 是最高优先级判定） |
+| 输入 140 / -5 | 被钳制为 100 / 0 |
+| 点档位 50% / 步进 +5 / −5 | 输入框数字相应变化 |
+| Enter / Esc | 保存 / 取消 |
+| 点弹层外部 | 关闭，不保存 |
+| 点**别人**任务的进度格 | 无反应，光标不变（该行没有 `data-wk-prog`） |
+| 点「未分配」区块里任务的进度格 | 无反应（本页对未分配只读，认领请去甘特图） |
+| Ctrl+Z | 撤销回改之前的百分比 |
+| 管理员账号 | 所有行（含未分配）都能点 |
+| 只读账号 / 导出的单文件 HTML | 所有行都点不动 |
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add src/views/work-view.js src/components/work-task.js src/components/index.js src/main-gantt.js src/styles/gantt.css tests/work-view.test.js
+git commit -m "feat(资源工作视图): 点击修改自己的任务完成度（按归属收敛，未分配本页只读）"
+```
+
+---
+
 ## Phase 6 — 用户管理与项目页
 
 ### Task 13: 用户管理页（编辑用户 + 指定对应人员）
@@ -1025,6 +1292,7 @@ git commit -m "chore(权限): 重建导出模板并补充权限模型与首次�
 | §8.5 保存失败回滚 | Task 6 |
 | §8.6 `undo/redo` 补守卫 | Task 7 |
 | §9 UI 收敛 | Task 10/11/12 |
+| §9.1 资源工作视图进度编辑（追加需求） | Task 7b（`setProgress` 数据层）+ Task 12b（界面） |
 | §10.1 用户管理页 | Task 13 |
 | §10.2 项目页 | Task 14 |
 | §11 测试策略 | Task 1/2/6/7/8/9/10/11/12/15 |
@@ -1038,6 +1306,8 @@ git commit -m "chore(权限): 重建导出模板并补充权限模型与首次�
 - Task 10 的提交信息里 `readoly` → `readonly`（已在计划正文改正）
 - `bar_norm` 必须剔除 `mod` / `isMs` 这两个 `collect()` 写回的运行期字段，否则**需求改名会被误判成"批量修改任务"**，直接把协作者的合法改名拒掉。已在 Task 4 Step 1 注释中写明理由。
 - Task 9 必须**同时**改 `getProfile` 的 select 与飞书后端返回值，否则协作者会被降级成只读，表现为"我明明配了人名却什么都不能改"。
+- Task 12b 的手工验证里，"改完成度 → 状态徽标变成什么"由 `taskStatus` 的日期口径决定（`core/task-status.js:62-71`），**不是简单的 40% → 进行中**。只有 100% 必定是「已完成」。已在正文写清，避免实施者据此误报失败。
+- 追加需求「资源工作视图进度编辑」的落地过程中纠正了两处我自己的判断错误：① 该视图**没有时间维度**（时间轴视角是 `res` 视图/工作组规划器，见 `work-view.js:5`），因此"时间视图下是否可编辑"这个问题不存在；② 选"点击输入"后，`pct=0` 无命中区的问题**自动消失**（那是拖拽方案才有的障碍）。
 
 ---
 
@@ -2202,6 +2472,157 @@ Expected: PASS。若 `tests/scheduler.test.js:527,533,542,773`、`tests/version.
 ```bash
 git add src/scheduler/ tests/scheduler.test.js
 git commit -m "feat(权限): assertEditable 支持按目标粒度守卫，undo/redo 补上数据层守卫"
+```
+
+---
+
+### Task 7b: `setProgress` mutation（资源工作视图的进度编辑，数据层）
+
+> **插入位置**：紧跟 Task 7，属于 MR3。设计见 spec §9.1。
+
+**Files:**
+- Modify: `src/scheduler/mutations.js`（新增 `setProgress` + 加进导出清单）
+- Modify: `src/scheduler/index.js`（挂到 `sched.setProgress`）
+- Test: `tests/scheduler.test.js`
+
+**Interfaces:**
+- Consumes: Task 7 的 `assertEditable(throwing, target)`
+- Produces: `sched.setProgress(taskId, pct) => number | null` —— 返回归一化后的百分比；被守卫拦下或不适用时返回 `null`
+
+**为什么必须新写**：`saveTask()` 的编辑分支**不写 `done`**（`t.done = committed.done`，从既有值继承）；现有唯一改 `done` 的路径是右键菜单的 `saveTask(id, { complete: true })`，它只会把 `done` 设成 100，表达不了"我现在 40%"。
+
+- [ ] **Step 1: 写失败测试**
+
+在 `tests/scheduler.test.js` 末尾追加：
+
+```js
+describe('scheduler: setProgress', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+
+  it('写入归一化后的整数百分比', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('m1-req', 40)).toBe(40);
+    expect(sched.getTask('m1-req').done).toBe(40);
+  });
+
+  it('越界与小数被钳制/取整，非法值不动数据', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('m1-req', 140)).toBe(100);
+    expect(sched.getTask('m1-req').done).toBe(100);
+    expect(sched.setProgress('m1-req', -20)).toBe(0);
+    expect(sched.getTask('m1-req').done).toBe(0);
+    expect(sched.setProgress('m1-req', 33.7)).toBe(34);
+    // 非数值（含空串）→ 直接返回 null，不把 done 写成 NaN
+    expect(sched.setProgress('m1-req', '')).toBe(null);
+    expect(sched.setProgress('m1-req', 'abc')).toBe(null);
+    expect(sched.getTask('m1-req').done).toBe(34);
+  });
+
+  it('不存在的任务 / 里程碑 → null 且不报错', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('no-such-id', 50)).toBe(null);
+    // m1-cfm 是里程碑（0 天单点，没有完成度概念）
+    expect(sched.setProgress('m1-cfm', 50)).toBe(null);
+    expect(sched.getTask('m1-cfm').done).toBeUndefined();
+  });
+
+  it('协作者能改自己负责的任务', () => {
+    const sched = makeSched();
+    asCollab();
+    expect(sched.setProgress('m1-req', 60)).toBe(60);      // res = ["张三"]
+  });
+
+  it('协作者改不了别人负责的任务（静默不生效）', () => {
+    const sched = makeSched();
+    asCollab();
+    const before = sched.getTask('m1-sit').done;           // res = ["吴十"]
+    expect(sched.setProgress('m1-sit', 60)).toBe(null);
+    expect(sched.getTask('m1-sit').done).toBe(before);
+  });
+
+  it('数据层对未分配任务仍然放行（本页的"未分配只读"是界面口径，不是数据层口径）', () => {
+    const sched = makeSched();
+    asCollab();
+    // 显式造一条未分配任务
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: [], id: 'U' });
+    expect(sched.setProgress('U', 30)).toBe(30);
+  });
+
+  it('只读模式拦下', () => {
+    const sched = makeSched();
+    userStore.set({ readonly: true });
+    expect(sched.setProgress('m1-req', 50)).toBe(null);
+  });
+
+  it('改进度不改变任何日期（不触发重排）', () => {
+    const sched = makeSched();
+    const before = JSON.stringify(planStore.state.modules.map(m => m.bars.map(b => [b.s, b.e, b.m])));
+    sched.setProgress('m1-req', 80);
+    const after = JSON.stringify(planStore.state.modules.map(m => m.bars.map(b => [b.s, b.e, b.m])));
+    expect(after).toBe(before);
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+Run: `npx vitest run tests/scheduler.test.js -t "setProgress"`
+Expected: FAIL —— `sched.setProgress is not a function`
+
+- [ ] **Step 3: 实现 `setProgress`**
+
+`src/scheduler/mutations.js`，在 `renameTask` 附近插入（它同为"单任务单字段"类）：
+
+```js
+  // 设置任务完成度（0–100 整数）。
+  // 为什么单独一条：saveTask 的编辑分支不写 done（从既有值继承），
+  // 而 { complete: true } 只能表达"100%"，没法表达"我现在 40%"。
+  // 改进度不影响日期，因此刻意不做 recomputeAffected —— 进度与排期是正交的两件事。
+  function setProgress(taskId, pct) {
+    const raw = taskId ? findRawBar(taskId) : null;
+    if (!raw) return null;
+    if (raw.m) return null;                       // 里程碑是 0 天单点，没有完成度概念
+    const n = Math.round(Number(pct));
+    if (!Number.isFinite(n)) return null;         // 空串 / 非数值 → 不动数据，避免写入 NaN
+    if (!assertEditable(false, { kind: 'task', task: raw })) return null;
+    const v = Math.max(0, Math.min(100, n));
+    raw.done = v;
+    ctx.save();                                   // 落进撤销栈，可 Ctrl+Z 撤回
+    return v;
+  }
+```
+
+并加进 `mutations.js` 末尾的导出清单（与 `renameTask`、`deleteTask` 并列）：
+
+```js
+    setProgress,
+```
+
+- [ ] **Step 4: 挂到 `sched`**
+
+`src/scheduler/index.js` 的返回对象里，在 `saveTask: mutations.saveTask,` 之后加：
+
+```js
+    setProgress: mutations.setProgress,
+```
+
+- [ ] **Step 5: 跑测试确认通过**
+
+Run: `npx vitest run tests/scheduler.test.js`
+Expected: PASS（含新增 8 条）
+
+- [ ] **Step 6: 跑全量测试**
+
+Run: `npm test`
+Expected: PASS
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add src/scheduler/mutations.js src/scheduler/index.js tests/scheduler.test.js
+git commit -m "feat(任务): 新增 setProgress 完成度写入（供资源工作视图改进度）"
 ```
 
 ---
