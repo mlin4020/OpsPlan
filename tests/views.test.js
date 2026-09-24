@@ -777,7 +777,8 @@ describe('views: 需求台账展开档案', () => {
 });
 
 describe('views: 生命周期徽标', () => {
-  it('四档各自映射到 lc-* 类名（结构固定，配色在 CSS）', () => {
+  it('五档各自映射到 lc-* 类名（结构固定，配色在 CSS）', () => {
+    expect(lifecycleBadge('待分析')).toContain('class="lc lc-analyze"');
     expect(lifecycleBadge('待确认')).toBe('<span class="lc lc-todo" title="生命周期（人工维护）：待确认">待确认</span>');
     expect(lifecycleBadge('已确认')).toContain('class="lc lc-ok"');
     expect(lifecycleBadge('已提测')).toContain('class="lc lc-sit"');
@@ -860,10 +861,10 @@ describe('需求台账：提出 / 生命周期 / 关键时间三列', () => {
     expect((tbody.match(/<td[\s>]/g) || []).length).toBe(10);
   });
 
-  it('筛选条有生命周期下拉，含四档选项与「未设置」', () => {
+  it('筛选条有生命周期下拉，含五档选项与「未设置」', () => {
     const html = renderReqView(null, makeReqCtx());
     expect(html).toContain('data-req-f="lifecycle"');
-    ['全部生命周期', '待确认', '已确认', '已提测', '已上线']
+    ['全部生命周期', '待分析', '待确认', '已确认', '已提测', '已上线']
       .forEach(t => expect(html).toContain(`>${t}</option>`));
     expect(html).toContain('>未设置</option>');   // 老数据的"未设置"必须能被单独筛出来
   });

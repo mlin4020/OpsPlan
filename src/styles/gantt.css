@@ -128,6 +128,9 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
    配色沿用项目数据语义色（灰=未开始 / 蓝=已定 / 琥珀=进行中 / 绿=完成），与主题品牌色无关。 */
 .lc{display:inline-flex;align-items:center;flex:none;font-size:9px;font-weight:800;line-height:1;padding:2px 5px;border-radius:5px;border:1px solid;letter-spacing:.2px;white-space:nowrap}
 .lc-none{color:#64748b;background:#f8fafc;border-color:#cbd5e1;border-style:dashed}
+/* 待分析用的是紫色而非灰色：它是流程第一档，若与「待确认」同为灰，
+   两个徽标在表格里几乎分不出来。紫色与「已确认」的蓝也有足够色相差。 */
+.lc-analyze{color:#7e22ce;background:#faf5ff;border-color:#e9d5ff}
 .lc-todo{color:#475569;background:#f1f5f9;border-color:#cbd5e1}
 .lc-ok{color:#1d4ed8;background:#dbeafe;border-color:#93c5fd}
 .lc-sit{color:#92400e;background:#fef3c7;border-color:#fcd34d}

@@ -30,10 +30,11 @@ export const normalizePriority = v => (PRIORITIES.includes(v) ? v : null);
 // 需求生命周期状态（人工维护的「流程门」，与自动计算的 moduleTag 状态正交）：
 //   台账的「状态」列由任务完成度自动推导（待启动/进行中/已逾期/已完成），
 //   这一列是人在弹窗里选的流程进展，两列并存、语义不同（设计文档 §2）。
+// 数组顺序即流程先后，台账按它排序（待分析 → 已上线）。
 // 注意：数据层不补默认值 —— LIFECYCLE_DEFAULT 只被新建弹窗使用，
-// 老数据缺失一律显示「未设置」，不替用户臆造「待确认」。
-export const MODULE_LIFECYCLE = ['待确认', '已确认', '已提测', '已上线'];
-export const LIFECYCLE_DEFAULT = '待确认';
+// 老数据缺失一律显示「未设置」，不替用户臆造任何一档。
+export const MODULE_LIFECYCLE = ['待分析', '待确认', '已确认', '已提测', '已上线'];
+export const LIFECYCLE_DEFAULT = '待分析';
 export const LIFECYCLE_NONE = '未设置';   // 仅用于展示与筛选，不写入需求对象
 export const normalizeLifecycle = v => (MODULE_LIFECYCLE.includes(v) ? v : null);
 

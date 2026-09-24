@@ -853,7 +853,7 @@ describe('scheduler: 需求提出信息与生命周期字段', () => {
     expect(mo.lifecycle).toBe('已确认');
   });
 
-  it('addModule 不传 lifecycle 时不臆造默认值（默认「待确认」由新建弹窗给）', () => {
+  it('addModule 不传 lifecycle 时不臆造默认值（默认「待分析」由新建弹窗给）', () => {
     const sched = makeSched();
     const mo = sched.addModule({ name: '无生命周期', autoCreate: false });
     // 键存在但值为 undefined —— 与 desc / docUrl 的写法一致（数据层不替用户补值）

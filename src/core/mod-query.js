@@ -101,7 +101,7 @@ function sortValue(mo, key, deps) {
     // 提出时间：未填写排最后（"还没补录"的需求不该插队）
     case 'proposed':
       return mo.proposedAt ? { v: mo.proposedAt } : { miss: true };
-    // 生命周期：按枚举序比较（待确认 → 已上线），未设置排最后
+    // 生命周期：按枚举序比较（待分析 → 已上线），未设置排最后
     case 'lifecycle': {
       const i = MODULE_LIFECYCLE.indexOf(mo.lifecycle);
       return i < 0 ? { miss: true } : { v: i };

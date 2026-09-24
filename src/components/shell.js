@@ -375,6 +375,7 @@ ${mobileSheetHTML()}
       <label>生命周期<span class="phase-tip" id="modLcTip">人工维护的流程门；与台账「状态」列（自动计算）不是一回事</span></label>
       <div class="seg" id="segModLc">
         <button type="button" class="btn" data-lc="">未设置</button>
+        <button type="button" class="btn" data-lc="待分析">待分析</button>
         <button type="button" class="btn" data-lc="待确认">待确认</button>
         <button type="button" class="btn" data-lc="已确认">已确认</button>
         <button type="button" class="btn" data-lc="已提测">已提测</button>

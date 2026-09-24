@@ -547,7 +547,7 @@ describe('需求台账：提出信息与生命周期字段贯通', () => {
     expect(shell).toContain('data-lc=""');          // 「未设置」档必须在
   });
 
-  it('打开时回显：新建默认「待确认」+ 当天，编辑回显原值', () => {
+  it('打开时回显：新建默认「待分析」+ 当天，编辑回显原值', () => {
     expect(modals).toMatch(/renderModLcSeg\(LIFECYCLE_DEFAULT, deps\)/);
     expect(modals).toMatch(/renderModLcSeg\(mo\.lifecycle, deps\)/);
     expect(modals).toMatch(/g\('newModProposedAt'\)\.value = todayStr\(deps\)/);

@@ -85,7 +85,7 @@ function openNewModModal(deps) {
   renderModSchedSeg(false, deps);   // 默认「已排期」
   renderModPriSeg(PRIORITY_DEFAULT, deps);   // 新建默认 P2（未设置留给历史数据）
   renderProposerOptions(deps);                       // 新建也要能选已有提出人
-  renderModLcSeg(LIFECYCLE_DEFAULT, deps);           // 新建默认「待确认」
+  renderModLcSeg(LIFECYCLE_DEFAULT, deps);           // 新建默认「待分析」
   g('btnNewModSave').textContent = '创建';
   const delBtn = g('btnDelMod'); if (delBtn) delBtn.style.display = 'none';
   const phaseRow = g('rowNewModPhases'); if (phaseRow) phaseRow.style.display = '';

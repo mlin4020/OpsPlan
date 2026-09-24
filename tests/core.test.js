@@ -505,13 +505,13 @@ describe('core: modStats 需求级进度（人日口径）', () => {
 });
 
 describe('core/default-data: 生命周期枚举与归一化', () => {
-  it('MODULE_LIFECYCLE 是四档，数组顺序即流程顺序', () => {
-    expect(MODULE_LIFECYCLE).toEqual(['待确认', '已确认', '已提测', '已上线']);
-    expect(LIFECYCLE_DEFAULT).toBe('待确认');
+  it('MODULE_LIFECYCLE 是五档，数组顺序即流程顺序，默认取第一档', () => {
+    expect(MODULE_LIFECYCLE).toEqual(['待分析', '待确认', '已确认', '已提测', '已上线']);
+    expect(LIFECYCLE_DEFAULT).toBe('待分析');
     expect(LIFECYCLE_NONE).toBe('未设置');
   });
 
-  it('normalizeLifecycle 只接受四档，其余一律 null', () => {
+  it('normalizeLifecycle 只接受五档，其余一律 null', () => {
     MODULE_LIFECYCLE.forEach(v => expect(normalizeLifecycle(v)).toBe(v));
     // 带空格 / 大小写变体 / 不存在的档位 / 非字符串，一律视为未设置（不做 trim 兜底）
     [undefined, null, '', ' 已上线', '已上线 ', '上线', '待确认中', 0, {}].forEach(
@@ -597,9 +597,9 @@ describe('core: 历史需求元信息回填（一次性）', () => {
       expect(inferLifecycle(mo, ctx)).toBe('已确认');
     });
 
-    it('任务尚未开工 → 待确认', () => {
+    it('任务尚未开工 → 待分析（与新建默认值同档，即"还没动过"）', () => {
       const mo = { name: 'X', bars: [{ id: 'a', p: 'dev', s: '2026-11-01', e: '2026-11-05', done: 0 }] };
-      expect(inferLifecycle(mo, ctx)).toBe('待确认');
+      expect(inferLifecycle(mo, ctx)).toBe('待分析');
     });
   });
 
@@ -621,11 +621,11 @@ describe('core: 历史需求元信息回填（一次性）', () => {
     });
 
     it('只缺一两个字段的需求不动它（回归：新建需求的提出人被静默盖成郑致远）', () => {
-      // 新建需求时弹窗会给默认提出时间（今天）与默认生命周期（待确认）→ 不会三项目全空。
+      // 新建需求时弹窗会给默认提出时间（今天）与默认生命周期（待分析）→ 不会三项目全空。
       // 因此"缺个别字段"只可能是用户已经动过这三项，绝不能被自动改。
       const bars = [{ id: 'a', p: 'dev', s: '2026-08-12', e: '2026-08-18', done: 0 }];
       const mods = [
-        { name: '只缺提出人', proposedAt: '2026-09-24', lifecycle: '待确认', bars },   // 新建后的典型形态
+        { name: '只缺提出人', proposedAt: '2026-09-24', lifecycle: '待分析', bars },   // 新建后的典型形态
         { name: '只缺生命周期', proposedBy: '张三', proposedAt: '2026-09-24', bars },
         { name: '只缺提出时间', proposedBy: '张三', lifecycle: '已确认', bars }
       ];
@@ -636,7 +636,7 @@ describe('core: 历史需求元信息回填（一次性）', () => {
       const plan = planRequirementBackfill([{ name: '待排期', bars: [] }], ctx);
       expect(plan[0].patch.proposedBy).toBe('郑致远');
       expect('proposedAt' in plan[0].patch).toBe(false);
-      expect(plan[0].patch.lifecycle).toBe('待确认');
+      expect(plan[0].patch.lifecycle).toBe('待分析');
     });
   });
 });
