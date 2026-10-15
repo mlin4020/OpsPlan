@@ -366,8 +366,22 @@ begin
     -- 删除
     if r.nbar is null then
       if not public.bar_owned(r.obar, p_rname) then
-        raise exception '无权删除他人负责的任务（id=%）',
-          coalesce(r.obar->>'id','?') using errcode = '42501';
+        -- 例外（决策 §1.1-13「需求创建人有该需求所有权限」的必然结果）：
+        --   整条需求是我创建的、且本次被删掉了 → 连带删除里面的他人任务**放行**。
+        --   这不是漏拦：spec §13 明确写了兜底方式是"前端删除确认弹窗必须列出
+        --   「将同时删除 N 条他人负责的任务」"，而不是服务端拦下来。
+        --   判据用 old 的 mod 归属：plan_tasks 已经把 mowner 带出来了。
+        --   滥用面已评估为零：他无法把别人的任务移进自己的需求（改 t.mod 属于改他人任务，被拦），
+        --   所以只可能删掉"别人主动排进他需求里"的任务。
+        if not (
+          r.omowner = p_rname
+          and not exists (
+            select 1 from jsonb_array_elements(coalesce(p_new->'modules','[]'::jsonb)) m
+             where (m->>'name') = r.omod)
+        ) then
+          raise exception '无权删除他人负责的任务（id=%）',
+            coalesce(r.obar->>'id','?') using errcode = '42501';
+        end if;
       end if;
       continue;
     end if;
