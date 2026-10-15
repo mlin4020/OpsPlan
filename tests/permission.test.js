@@ -166,3 +166,122 @@ describe('其余判定', () => {
     expect(canManageUsers(COLLAB)).toBe(false);
   });
 });
+
+// ============================================================
+// 跨身份交叉矩阵
+//
+// 为什么要有这一节（不是为了补漏，而是把覆盖补成显式的）：
+//   后面还有 16 个任务（数据层守卫、界面收敛、服务端 plpgsql 校验）全部建立在这组
+//   判定函数之上，都按同一组规则实现。上面各节的用例是「按函数分节」写的，高阶判定
+//   （canEditTask / canEditModuleFields / canManageModule）只跑过**单一元素** res。
+//   而这类实现里最危险的改动是**静默回归**：有人把 `taskMine` 的 `includes` 重构成
+//   `some(...)`、或把形态判断挪走 —— 这类改动不会让上面任何一条用例变红。
+//   下面用「多人 res × 四身份」的交叉矩阵把这些组合钉死：任一条被改坏都会立即转红。
+//
+// 注意：这里只新增用例，**未改动**上方任何既有用例。
+// ============================================================
+describe('跨身份交叉矩阵（多人 res × 四身份）', () => {
+  // 为什么先钉住矩阵的前提：矩阵的每一行都依赖这四个常量的身份档位本身没被误标。
+  //   FULL/OWNER 的 access 同为 full，区别只在 role（owner 非 admin）——这是刻意的：
+  //   项目级判定（删项目/用户管理）靠 role 区分两者，任务级判定两者等价。
+  it('四个身份常量的档位是矩阵的前提', () => {
+    expect([FULL.access, OWNER.access, COLLAB.access, READONLY.access])
+      .toEqual([ACCESS.FULL, ACCESS.FULL, ACCESS.COLLAB, ACCESS.READONLY]);
+    expect(FULL.role).toBe('admin');
+    expect(OWNER.role).toBe('user');
+    expect(COLLAB.rname).toBe('张三');
+    expect(READONLY.rname).toBe('');
+  });
+
+  // ---- 1. canEditTask × 多人 res ----
+  // 挡的回归：把 taskMine 的 `t.res.includes(rname)` 改成 `t.res.some(...)` 之类的
+  // 形态等价但语义漂移的写法；或把「res 为空数组 = 未分配可认领」这条放行挪到 full 分支里。
+  describe('canEditTask × 多人 res', () => {
+    it('res 含我（多元素）→ collab 放行', () => {
+      // 挡：includes 被改成「只看第一个元素」/「要求全部匹配」等写法。
+      expect(canEditTask({ res: ['张三', '李四'] }, COLLAB)).toBe(true);
+    });
+    it('res 不含我（多元素）→ collab 拒绝', () => {
+      // 挡：把归属判断退化成「res 非空即放行」。
+      expect(canEditTask({ res: ['李四', '王五'] }, COLLAB)).toBe(false);
+    });
+    it('res 含我（多元素）→ readonly 仍拒绝', () => {
+      // 挡：把「先判 isCollab」这一层短路掉（只要归属命中就放行）。
+      expect(canEditTask({ res: ['张三', '李四'] }, READONLY)).toBe(false);
+    });
+    it('res 不含我（多元素）→ full 仍放行', () => {
+      // 挡：把 full 的全放行改成「也要归属命中」。
+      expect(canEditTask({ res: ['张三', '李四'] }, FULL)).toBe(true);
+    });
+    it('★ res 为空（未分配）：collab 可认领、readonly 不可 —— 两者必须区分', () => {
+      // 本节最关键的一条：它同时锁住两个方向。
+      //   挡 A：把「未分配可认领」从 taskMine 挪进 collab 之外的档位（readonly 被误放行）。
+      //   挡 B：把「未分配」当成「没有归属」直接拒绝（collab 被误拒）。
+      //   只有 isCollab 这一档才够得到「未分配放行」分支 —— 这一条把这个不对称钉死。
+      expect(canEditTask({ res: [] }, COLLAB)).toBe(true);
+      expect(canEditTask({ res: [] }, READONLY)).toBe(false);
+      expect(canEditTask({ res: [] }, FULL)).toBe(true);      // full 不受归属影响
+      expect(canEditTask({ res: [] }, OWNER)).toBe(true);     // owner 等价 full
+    });
+  });
+
+  // ---- 2. canEditModuleFields × 四身份 ----
+  // 挡的回归：把字段级判定从「full || collab」收窄成「仅 full」，
+  // 或把 collab 那条分支误接到 modMine（字段级不看归属）。
+  // 四个身份必须全部显式断言 —— 只测三个的话，漏掉的那个档位被改坏不会被发现。
+  describe('canEditModuleFields × 四身份', () => {
+    it('full / owner / collab 都为真，readonly 为假', () => {
+      expect(canEditModuleFields(FULL)).toBe(true);
+      expect(canEditModuleFields(OWNER)).toBe(true);
+      expect(canEditModuleFields(COLLAB)).toBe(true);
+      expect(canEditModuleFields(READONLY)).toBe(false);
+    });
+  });
+
+  // ---- 3. canManageModule × 归属 × 四身份 ----
+  // 挡的回归：把归属级判定与字段级判定混为一谈（都返回 true）、
+  // 或把「无主需求」放开给 collab（设计上无主需求只有 full 能动）。
+  describe('canManageModule × 归属 × 四身份', () => {
+    it('归属命中：collab 放行', () => {
+      expect(canManageModule({ owner: '张三' }, COLLAB)).toBe(true);
+    });
+    it('归属不命中：collab 拒绝', () => {
+      expect(canManageModule({ owner: '李四' }, COLLAB)).toBe(false);
+    });
+    it('无主需求：collab 拒绝（无主不等于可认领）', () => {
+      // 与任务层的「res:[] 可认领」形成对照：任务未分配可认领，需求无主不可动。
+      expect(canManageModule({}, COLLAB)).toBe(false);
+    });
+    it('归属命中：owner 放行（owner 等价 full，不受归属影响）', () => {
+      expect(canManageModule({ owner: '李四' }, OWNER)).toBe(true);
+    });
+    it('归属命中：readonly 仍拒绝', () => {
+      expect(canManageModule({ owner: '张三' }, READONLY)).toBe(false);
+    });
+  });
+
+  // ---- 4. canTouchTask 的形态分流（显式钉死）----
+  // 这是整个权限模型里最容易搞错的一处：同一个 ctx、同一个「我」，
+  // 普通任务看 res、里程碑看需求归属 —— 两者结果可以相反。
+  // 挡的回归：把 canTouchTask 直接写成 canEditTask（里程碑会被当成 res 缺失/未分配而误放行）。
+  describe('canTouchTask 的形态分流', () => {
+    it('★ 同一 collab 身份下：普通任务因 res 不含我而拒，里程碑因需求归我而放行', () => {
+      const task = { res: ['李四'] };                    // 普通任务：不含我
+      const ms = { m: '2026-09-09', label: '9/9 上线' }; // 里程碑：无 res
+      const mo = { owner: '张三' };                      // 需求归我
+
+      // 若 canTouchTask 退化成「直接调 canEditTask」：里程碑没有 res 数组 → taskMine 返回 false，
+      // 于是里程碑会被拒（下面第一行仍为 true 即挡不住这一改法）——真正的分水岭在第二组：
+      // 里程碑「无 res」既不能当成「未分配可认领」（那是任务层语义），也不能当成「无归属即拒」。
+      expect(canTouchTask(task, mo, COLLAB)).toBe(false);  // 任务分支：看 res
+      expect(canTouchTask(ms, mo, COLLAB)).toBe(true);     // 里程碑分支：看需求归属
+
+      // 反向对照：需求不归我时，两条分支都拒（锁定「里程碑确实走了需求归属」而非无条件放行）
+      expect(canTouchTask(ms, { owner: '李四' }, COLLAB)).toBe(false);
+
+      // 形态判定真源：里程碑走 canEditMilestone，普通任务走 canEditTask —— 显式对齐
+      expect(canTouchTask(ms, mo, COLLAB)).toBe(canEditMilestone(ms, mo, COLLAB));
+      expect(canTouchTask(task, mo, COLLAB)).toBe(canEditTask(task, COLLAB));
+    });
+  });
+});
