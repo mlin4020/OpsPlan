@@ -346,7 +346,20 @@ begin
     select o.tkey as okey, o.bar as obar, o.mod as omod, o.mowner as omowner,
            n.bar as nbar, n.mod as nmod
       from public.plan_tasks(p_old) o
-      full outer join public.plan_tasks(p_new) n on n.tkey = o.tkey
+      -- ⚠️ JOIN 必须**同时**比 tkey 与 mod。任务所属需求在数据里是"位置性"的
+      --   （落在哪个 modules[].bars 里就是哪个需求的，mutations.js 的 moveBar 用 splice/push 实现），
+      --   `plan_tasks` 的 tkey 只取 b.id、`bar_norm` 又剔掉了 mod —— 于是"纯跨需求移动"
+      --   （只改 t.mod、其余字段不变）会满足 o.tkey = n.tkey 且 o.bar = n.bar，
+      --   不进 diff 行集、三条分支一条都不走 → **静默放行**。
+      --   后果是一条两步越权路径：① 把他人任务搬进我的需求（放行）→ ② 删我的需求（连带删除）。
+      --   补上 mod 后，移动会退化成"从旧需求删除 + 向新需求新增"两行，各自走既有分支：
+      --     移动他人任务 → 删除分支的 bar_owned=false 且例外不成立（omowner 不是我）→ REJECT
+      --     移动自己的任务 → 删除/新增两侧都归我 → 放行（符合设计）
+      --     需求改名 → 所有 bar 都换 mod，但删除侧被"我是需求创建人且该需求已消失"豁免、
+      --              新增侧被"该需求是本次新建的"豁免 → 仍放行
+      --   注意**不能**把 mod 编进 tkey：Step 7 的 v_moved 需要用"只按 id"的 join 认
+      --   "被移动过的任务"，否则"先竖拖换需求、再级联"时 v_moved 为空、下游钉住会被误拒。
+      full outer join public.plan_tasks(p_new) n on n.tkey = o.tkey and n.mod = o.mod
      where o.tkey is null or n.tkey is null or o.bar <> n.bar
   loop
     -- 新增
@@ -371,8 +384,9 @@ begin
         --   这不是漏拦：spec §13 明确写了兜底方式是"前端删除确认弹窗必须列出
         --   「将同时删除 N 条他人负责的任务」"，而不是服务端拦下来。
         --   判据用 old 的 mod 归属：plan_tasks 已经把 mowner 带出来了。
-        --   滥用面已评估为零：他无法把别人的任务移进自己的需求（改 t.mod 属于改他人任务，被拦），
-        --   所以只可能删掉"别人主动排进他需求里"的任务。
+        --   滥用面：他**不能**"把别人的任务搬进自己的需求再删"——因为上面 (8) 的 JOIN 同时比了 mod，
+        --     跨需求移动他人任务会落到删除分支且 omowner 不是我 → 在**第一次** save_plan 就被拒。
+        --     所以他只可能删掉"别人主动排进他需求里"的任务（那是设计明确接受的后果，见 spec §13）。
         if not (
           r.omowner = p_rname
           and not exists (
