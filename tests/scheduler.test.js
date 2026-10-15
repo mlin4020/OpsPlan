@@ -888,3 +888,60 @@ describe('scheduler: 需求提出信息与生命周期字段', () => {
     expect('lifecycle' in mods().find(m => m.name === '非法状态')).toBe(false);
   });
 });
+
+describe('scheduler: 需求归属 owner', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  it('addModule 默认把归属写成当前用户的人名', () => {
+    const sched = makeSched();
+    userStore.set({ resourceName: '张三' });
+    sched.addModule({ name: '归属需求', autoCreate: false });
+    expect(planStore.state.modules.find(m => m.name === '归属需求').owner).toBe('张三');
+  });
+
+  it('addModule 没配人名时不写归属（不臆造）', () => {
+    const sched = makeSched();
+    userStore.set({ resourceName: '' });
+    sched.addModule({ name: '无主需求', autoCreate: false });
+    const mo = planStore.state.modules.find(m => m.name === '无主需求');
+    expect('owner' in mo).toBe(false);
+  });
+
+  it('opts.owner 可显式指定（供转交/导入用）', () => {
+    const sched = makeSched();
+    userStore.set({ resourceName: '张三' });
+    sched.addModule({ name: '指定归属', autoCreate: false, owner: '李四' });
+    expect(planStore.state.modules.find(m => m.name === '指定归属').owner).toBe('李四');
+  });
+
+  it('addModule 归属人名带空格会被 trim', () => {
+    const sched = makeSched();
+    userStore.set({ resourceName: '  张三  ' });
+    sched.addModule({ name: '去空格', autoCreate: false });
+    expect(planStore.state.modules.find(m => m.name === '去空格').owner).toBe('张三');
+  });
+
+  it('updateModule 支持转交归属', () => {
+    const sched = makeSched();
+    userStore.set({ resourceName: '张三' });
+    sched.addModule({ name: '待转交', autoCreate: false });
+    sched.updateModule({ name: '待转交', owner: '李四' });
+    expect(planStore.state.modules.find(m => m.name === '待转交').owner).toBe('李四');
+  });
+
+  it('updateModule 传空串 = 清除归属（回到无主），与 desc/docUrl 同口径', () => {
+    const sched = makeSched();
+    const mo = planStore.state.modules.find(m => m.name === '官网改版');
+    mo.owner = '张三';
+    sched.updateModule({ name: '官网改版', owner: '' });
+    expect('owner' in planStore.state.modules.find(m => m.name === '官网改版')).toBe(false);
+  });
+
+  it('不传 owner 时 updateModule 不动归属（patch 语义）', () => {
+    const sched = makeSched();
+    const mo = planStore.state.modules.find(m => m.name === '官网改版');
+    mo.owner = '张三';
+    sched.updateModule({ name: '官网改版', pri: 'P0' });
+    expect(planStore.state.modules.find(m => m.name === '官网改版').owner).toBe('张三');
+  });
+});

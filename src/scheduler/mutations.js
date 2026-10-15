@@ -304,6 +304,14 @@ export function createMutations(ctx) {
       docUrl: (opts.docUrl || '').trim() || undefined,
       bars: []
     };
+    // 需求归属人（设计文档 §4.2）：默认 = 当前登录用户对应的人名。
+    //   有归属 → 该人对这个需求有全部权限（改名/删除/归档/转交）
+    //   没配人名 / 老数据缺失 → 不写该字段 = 无主，归属级操作仅项目所属人·管理员，不臆造归属
+    // 注意：这里必须「空值就不写字段」，不能写成字面量里的 `owner: ... || undefined`——
+    //   那样键仍然存在（只是值为 undefined），与 desc / docUrl 等同类字段「空则不写」的口径不一致，
+    //   也会让下游 'owner' in mo 这类存在性判断误判为「有归属」
+    const owner = (opts.owner != null ? String(opts.owner) : String(userStore.state.resourceName || '')).trim();
+    if (owner) mo.owner = owner;
     // 支持新建时直接标记为待排期（尚未排期，只登记需求）
     if (opts.unscheduled) mo.unscheduled = true;
     // 自动创建所选阶段任务和里程碑（opts.autoCreate 默认 true）
@@ -408,6 +416,12 @@ export function createMutations(ctx) {
     }
     // 优先级：传 null/'' 表示清除（回到「未设置」），传非法值按清除处理
     if (opts.pri != null || 'pri' in opts) mo.pri = normalizePriority(opts.pri);
+    // 需求归属转交（归属级操作，权限见 Task 7）：传空串 = 清除（回到无主），
+    // 与 desc / docUrl 的"传空串 = 清除"口径一致（字段直接 delete，不留空串）
+    if ('owner' in opts) {
+      const ow = String(opts.owner || '').trim();
+      if (ow) mo.owner = ow; else delete mo.owner;
+    }
     // 排期状态（人工）：true = 待排期。待排期需求不在总览展示排期，也不计入并行/逾期统计
     if (opts.unscheduled != null) {
       const wasUnscheduled = !!mo.unscheduled;
