@@ -1236,7 +1236,12 @@ git commit -m "feat(项目): 所属人可管理自己的项目（改名/换负�
 - [ ] **Step 1: 跑全量测试**
 
 Run: `npm test`
-Expected: 全绿。**注意**：`tests/auth.test.js` 里有 3 条**既失败**用例（`friendlyAuthError` 未映射为中文），与本次无关，别误当成自己弄坏的。
+Expected: 全绿（19 个文件 / 566+ 用例）。
+
+> **基线说明（2026-10-15 更正）**：本计划早期版本提醒"`tests/auth.test.js` 有 3 条既失败用例
+> （`friendlyAuthError` 未映射为中文）"——**这句已过期**，那 3 条已被 `262e3ee`（登录拆独立路由）
+> 顺手修掉了（那次正好改了 `src/services/auth.js`）。Task 1 执行时实测 `auth.test.js` 6/6 全绿。
+> 也就是说：**基线是全绿，出现任何失败都是本次改动引入的**，别再拿"本来就红"当挡箭牌。
 
 - [ ] **Step 2: 构建**
 
