@@ -433,19 +433,28 @@ Expected: FAIL —— 第一条 `expected undefined to be '张三'`
 
 - [ ] **Step 3: 在 `addModule` 里写入归属**
 
-`src/scheduler/mutations.js` 的对象字面量（现 `:286-306`），在 `name,` 之后插入：
+⚠️ **不能在对象字面量里写 `owner: ... || undefined`**。`{ owner: undefined }` 是**有键**的（`'owner' in mo === true`），
+于是内存里"看起来有归属"、而 `JSON.stringify` 又会把 `undefined` 值的键丢掉 → **内存形状与落库形状不一致**。
+所以必须"空值就不写字段"：
+
+`src/scheduler/mutations.js`，在 `const mo = { … };` 对象字面量（现 `:286-306`）**之后**、`if (opts.unscheduled) …` 之前插入：
 
 ```js
-    const mo = {
-      name,
-      // 需求归属人（设计文档 §4.2）：默认 = 当前登录用户对应的人名。
-      //   有归属 → 该人对这个需求有全部权限（改名/删除/归档/转交）
-      //   没配人名 / 老数据缺失 → undefined = 无主，归属级操作仅项目所属人·管理员，不臆造归属
-      owner: (opts.owner != null ? String(opts.owner) : String(userStore.state.resourceName || '')).trim() || undefined,
-      tag: (opts.tag || '').trim() || '待启动',
+    // 需求归属人（设计文档 §4.2）：默认 = 当前登录用户对应的人名。
+    //   有归属 → 该人对这个需求有全部权限（改名/删除/归档/转交）
+    //   没配人名 / 老数据缺失 → 键不存在 = 无主，归属级操作仅项目所属人·管理员，不臆造归属
+    //
+    // 注意：这里必须"空值就不写字段"，不能写成字面量里的 `owner: ... || undefined` ——
+    //   `{ owner: undefined }` 是**有键**的，会让 `'owner' in mo` 这类存在性判断误判为"有归属"；
+    //   而 JSON.stringify 又会丢掉该键，于是内存与落库形状不一致。
+    const owner = (opts.owner != null ? String(opts.owner) : String(userStore.state.resourceName || '')).trim();
+    if (owner) mo.owner = owner;
 ```
 
 （`userStore` 已在 `mutations.js:15` 导入，无需新增 import。）
+
+**本任务此时 `userStore.state.resourceName` 还不存在**（Task 9 才加），所以恒为空 → 不写字段。
+这是刻意的零行为变化；**不要**为了让测试好看去改 `user-store.js`。
 
 - [ ] **Step 4: 在 `updateModule` 里支持转交**
 
