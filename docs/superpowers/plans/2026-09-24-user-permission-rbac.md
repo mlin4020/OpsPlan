@@ -1987,17 +1987,29 @@ grant execute on function public.save_plan(uuid, jsonb) to authenticated;
 `assert_plan_editable` 是**纯校验函数**（`returns void`，只 `raise`、**不写任何库**），用 `jsonb_set` 造 diff 就能测，
 不必真的调 RPC。**用 `supabase_execute_sql` 直接在生产库上跑**——它不写数据，所以安全。
 
-把下面这一整段包在 `begin; … rollback;` 里，让辅助函数 `t_try` **不留在库里**：
+> **刻意不用外层事务**：MCP **只返回本次调用最后一条语句**的结果（Task 3 已实测），
+> `begin; … rollback;` 会把探针结果盖掉。所以改成"辅助函数顺带把结果写进临时表 + 最后一条 `select` 带回来"，
+> 辅助函数在**另一次调用**里单独 `drop`。
 
 ```sql
--- 测试辅助：返回 PASS 或 REJECT: 原因
+create temp table if not exists t_cases(seq serial, result text);
+truncate t_cases restart identity;
+
+-- 测试辅助：返回 PASS 或 REJECT: 原因，**并顺带把结果按调用顺序写进 t_cases**。
+-- 为什么要有这个副作用：MCP 不返回 raise notice，只有本次调用最后一条语句的结果能带回来；
+-- 把它做成 t_try 的副作用，下面的用例行就一行都不用改（每行仍恰好调用 t_try 一次）。
 create or replace function public.t_try(p_old jsonb, p_new jsonb, p_rname text)
 returns text language plpgsql as $$
+declare r text;
 begin
-  perform public.assert_plan_editable(p_old, p_new, p_rname);
-  return 'PASS';
-exception when others then
-  return 'REJECT: ' || sqlerrm;
+  begin
+    perform public.assert_plan_editable(p_old, p_new, p_rname);
+    r := 'PASS';
+  exception when others then
+    r := 'REJECT: ' || sqlerrm;
+  end;
+  insert into t_cases(result) values (r);
+  return r;
 end; $$;
 
 do $$
@@ -2088,6 +2100,23 @@ begin
   raise notice '17 手改他人上线里程碑   → %', public.t_try(b, n, '张三');
 end $$;
 
+-- 最后一条语句：把 17 条结果按调用顺序带回来（顺序即下方用例的编号顺序）
+select c.seq, v.label, c.result
+  from t_cases c
+  join (values
+    (1,'1  改自己任务'),(2,'2  改他人任务'),(3,'3  删他人任务'),
+    (4,'4  级联钉住(有依据)'),(5,'5  级联钉住(无依据)'),(6,'6  改未分配任务'),
+    (7,'7  删自己的需求'),(8,'8  删他人需求'),(9,'9  改自己需求名'),
+    (10,'10 改他人需求名'),(11,'11 归档他人需求'),(12,'12 改他人需求字段'),
+    (13,'13 改资源库'),(14,'14 伪造项目周期'),(15,'15 删版本'),
+    (16,'16 版本机制改上线里程碑'),(17,'17 手改他人上线里程碑')
+  ) v(seq, label) on v.seq = c.seq
+ order by c.seq;
+```
+
+**执行完再单独发起一次调用清理辅助函数**（不能放在同一次调用的末尾，否则会盖掉结果）：
+
+```sql
 drop function if exists public.t_try(jsonb, jsonb, text);
 ```
 
@@ -2112,6 +2141,72 @@ drop function if exists public.t_try(jsonb, jsonb, text);
 | 15 | 删版本 | REJECT |
 | 16 | 版本机制改上线里程碑 | PASS |
 | 17 | 手改他人上线里程碑 | REJECT |
+
+- [ ] **Step 7b: 端到端冒烟 `save_plan` 本身（不只是校验函数）**
+
+上面 17 条测的是**规则**（`assert_plan_editable` 是纯函数、只 `raise`）；而 RPC 的**身份分流**没被覆盖。
+按 Phase 2 的手法跑（结论写进变量 → 故意 `raise` 撤销写入 → 最后一条 `select` 带回来）：
+
+```sql
+create temp table if not exists t_rpc(label text, result text);
+truncate t_rpc;
+do $rpc$
+declare
+  msg   text;
+  c_li  uuid := 'f65c4375-0c6f-49aa-81b5-4ea5cf4a8acb';   -- 李功林：所属人 + 管理员
+  c_xin uuid := 'c6ff5485-65cc-4b90-85a1-1b3d4f7df70f';   -- 徐新：普通用户，resource_name 为空
+  v_pid  uuid;
+  v_plan jsonb;
+begin
+  select id, plan into v_pid, v_plan from public.projects limit 1;
+
+  -- ① 所属人 → 快路径整份替换（内容与库中相同，等价空操作）
+  perform set_config('request.jwt.claims', json_build_object('sub', c_li)::text, false);
+  begin
+    perform public.save_plan(v_pid, v_plan);
+    msg := 'PASS(放行)';
+    raise exception 'PROBE_ROLLBACK';
+  exception when others then
+    if msg is null then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end if;
+  end;
+  insert into t_rpc values ('① 所属人 save_plan 快路径', msg);
+
+  -- ② 已登录但未配「对应人员」→ 应被拒（这是最容易漏配、也最难排查的路径）
+  msg := null;
+  perform set_config('request.jwt.claims', json_build_object('sub', c_xin)::text, false);
+  begin
+    perform public.save_plan(v_pid, v_plan);
+    msg := 'PASS(放行) <-- 不该发生！';
+    raise exception 'PROBE_ROLLBACK';
+  exception when others then
+    if msg is null then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end if;
+  end;
+  insert into t_rpc values ('② 未配对应人员的用户', msg);
+
+  -- ③ 未登录 → 应被拒
+  msg := null;
+  perform set_config('request.jwt.claims', '', false);
+  begin
+    perform public.save_plan(v_pid, v_plan);
+    msg := 'PASS(放行) <-- 不该发生！';
+    raise exception 'PROBE_ROLLBACK';
+  exception when others then
+    if msg is null then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end if;
+  end;
+  insert into t_rpc values ('③ 未登录', msg);
+end $rpc$;
+select label, result from t_rpc order by label;
+```
+
+预期：
+
+| 用例 | 期望 |
+|---|---|
+| ① 所属人快路径 | `PASS(放行)` |
+| ② 已登录但未配「对应人员」 | `REJECT: 42501 / 账号未指定对应人员，无法保存（请联系管理员）` |
+| ③ 未登录 | `REJECT: 42501 / 未登录，无法保存` |
+
+**同时确认项目 plan 未被本次冒烟改动**（`select updated_at, md5(plan::text) from public.projects;` 与跑之前一致）。
 
 - [ ] **Step 8: 提交**
 
