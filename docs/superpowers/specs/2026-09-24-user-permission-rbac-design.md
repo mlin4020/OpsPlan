@@ -337,27 +337,46 @@ alter table public.profiles add column if not exists resource_name text;
 
 不做回填（§4.1）。
 
-### 7.2 敏感字段守卫触发器（修 §3 漏洞）
+### 7.2 敏感字段守卫触发器（修 §3 与 §3.1 两条漏洞）
 
 ```sql
 create or replace function public.guard_profile_sensitive()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  if (new.role is distinct from old.role
-      or new.resource_name is distinct from old.resource_name)
-     and not public.is_admin() then
-    raise exception '仅管理员可修改角色与对应人员' using errcode = '42501';
+  if tg_op = 'INSERT' then
+    -- 新行一律按最小权限落地：非管理员不能给自己写 role / resource_name
+    if not public.is_admin() then
+      new.role := 'user';
+      new.resource_name := null;
+    end if;
+  else
+    if (new.role is distinct from old.role
+        or new.resource_name is distinct from old.resource_name)
+       and not public.is_admin() then
+      raise exception '仅管理员可修改角色与对应人员' using errcode = '42501';
+    end if;
   end if;
   return new;
 end; $$;
 
 drop trigger if exists profiles_guard_sensitive on public.profiles;
 create trigger profiles_guard_sensitive
-  before update on public.profiles
+  before insert or update on public.profiles
   for each row execute function public.guard_profile_sensitive();
 ```
 
-必须用触发器：`with check` 无法引用 `OLD`，在策略里查同表还会有可见性/竞态问题。加完之后普通用户改自己的 `display_name` 照旧可用，改 `role` / `resource_name` 被拒。
+必须用触发器：`with check` 无法引用 `OLD`，在策略里查同表还会有可见性/竞态问题。
+
+**两条路径的处置方式刻意不同**（2026-10-15 补充）：
+
+| 路径 | 做法 | 理由 |
+|---|---|---|
+| `UPDATE`（§3） | **抛错** `42501` + 中文原因 | 这是真实的越权尝试，必须让调用方看见失败 |
+| `INSERT`（§3.1） | **静默改写**成最小权限 | INSERT 有合法用法（`handle_new_user()` 之外可能存在的自建 profile 流程），抛错会把它一起打死。改写能让非法输入退化成安全值，代价是调用方不知道自己被降级了 |
+
+**线上实测结论（2026-10-15，Task 3 应用后）**：非管理员改自己 `role` → 被拒 `42501`；
+非管理员改自己 `display_name` → 放行（不误伤改名）；管理员改别人 `role` → 放行；
+非管理员 INSERT `role='admin'` → 插入成功但实际落库为 `user / null`。
 
 ### 7.3 新函数
 

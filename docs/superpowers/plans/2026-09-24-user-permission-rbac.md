@@ -1602,7 +1602,7 @@ select id, display_name, role, resource_name from public.profiles order by creat
 
 > 若 `徐新` 变成 `admin`，说明 Step 4 的事务回滚没生效 —— **立即回报 BLOCKED**，别继续。
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
 git add deploy/supabase/migration.sql
