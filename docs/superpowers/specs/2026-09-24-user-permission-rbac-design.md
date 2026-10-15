@@ -618,6 +618,7 @@ setProgress(taskId, pct)
 | 服务端校验依赖"任务 `id`"做 diff | 里程碑 `id` 是惰性生成并写回原始数据的（`src/scheduler/index.js:47`），首屏 `collect()` 前可能缺失。缺失时归入"新增/删除"分支——因里程碑 `res` 不存在、`taskMine` 对空 `res` 为真，不会误拒合法操作，但需在实现时确认一遍 |
 | **协作者可伪造 `start` / `end`** | 派生数据刻意不校验（§6.3 已详述）。影响仅限 hero 副标题一行显示，且下次加载即被任务日期覆盖。**这条是有意为之，不要去"修"** |
 | **`bar_norm` 必须剔除 `mod` / `isMs`** | 这两个是 `collect()` 写回的运行期字段。不剔除的话，需求改名会让所有 `bars[].mod` 一起变 → 被误判成"批量修改任务" → 协作者的合法改名直接被拒 |
+| **守卫触发器会让"用 SQL 控制台改 role"失效**（2026-10-15 发现并实测） | 触发器对**所有角色**生效，SQL 控制台里 `auth.uid()` 为 NULL → `is_admin()` 为 false → `update profiles set role='admin'` 被拒（实测 `REJECT: 42501`）。**这推翻了 README 里"注册第一个账号后把它提成管理员"的引导步骤**。<br>**合法运维的绕法**（需表属主权限，`postgres`/`supabase_admin` 有）：<br>`alter table public.profiles disable trigger profiles_guard_sensitive;` → 操作 → `alter table public.profiles enable trigger profiles_guard_sensitive;`<br>（另一条 `set session_replication_role = replica;` 只有超级用户可用。）<br>**注意**：应用内的管理员改角色走的是 `updateProfile`（带管理员 JWT）→ 不受影响。 |
 
 ---
 

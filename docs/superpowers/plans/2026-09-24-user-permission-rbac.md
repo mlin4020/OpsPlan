@@ -1299,6 +1299,23 @@ curl -sS -X PATCH "$SUPABASE_URL/rest/v1/projects?id=eq.<项目id>" \
 1. 四种身份与判定口径（指向 `docs/superpowers/specs/2026-09-24-user-permission-rbac-design.md`）
 2. **首次部署必须做的事**：执行 `deploy/supabase/migration.sql` 后，用管理员账号在「用户管理」里**逐个指定"对应人员"**——在此之前所有账号都是只读（这是 `resource_name` 默认 NULL 的必然代价）
 3. 明确写出「细粒度权限由 `save_plan` RPC 在服务端强制；`projects_update` 策略未放宽，直连写仍被 RLS 拒绝」
+4. **必须改掉「把第一个账号提成管理员」那段引导**。它现在写的是：
+   ```sql
+   update public.profiles set role = 'admin' where display_name = '你的名字';
+   ```
+   Task 3 的守卫触发器装上之后，**这条 SQL 会被拒**（实测 `REJECT: 42501`）——触发器对所有角色生效，
+   而 SQL 控制台里 `auth.uid()` 是 NULL → `is_admin()` 为 false。
+   改成：
+   ```sql
+   -- 已经跑过 migration.sql 的库：临时关触发器
+   alter table public.profiles disable trigger profiles_guard_sensitive;
+   update public.profiles set role = 'admin' where display_name = '你的名字';
+   alter table public.profiles enable trigger profiles_guard_sensitive;
+
+   -- 或者：先建账号再跑 migration.sql（顺序反过来，最省事）
+   ```
+   并在「多项目与权限」一节写明这条边界：**应用内的管理员改角色不受影响**（走 `updateProfile`，带管理员 JWT），
+   受影响的只有"在 SQL 控制台直接改"。理由见 spec §13 对应风险行。
 
 - [ ] **Step 7: 提交**
 
