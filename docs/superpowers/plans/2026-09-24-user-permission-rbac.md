@@ -1309,16 +1309,25 @@ git commit -m "chore(权限): 重建导出模板并补充权限模型与首次�
 
 ---
 
-## 部署清单（人工，不能自动化）
+## 部署清单
 
-本项目没有 Supabase MCP，服务端变更只能手工执行：
+> **2026-10-15 更正**：本项目**能通过 Supabase MCP 自动化**（`supabase_apply_migration` / `supabase_execute_sql`），
+> 不再是"只能手工执行"。迁移由各任务的 Step 用 MCP 应用并当场验证（见 Phase 2 的验证手法）。
 
-1. 在 Supabase SQL Editor 执行整份 `deploy/supabase/migration.sql`（幂等，可重复执行）
-2. 验证 §Task 3 Step 3–6、§Task 4 Step 7 的 17 条用例全绿
-3. 用管理员账号登录 → 「用户管理」→**逐个给账号指定「对应人员」**
-4. 指定完成后，让每个协作者登录验证"能改自己的任务"
+**已在执行中完成的部分**：Task 3 / 4 / 5 的迁移由各自任务的 Step 应用，且当场跑验证用例。
 
-**第 3 步之前全体只读**——这是 `resource_name` 默认 `NULL` 的必然代价，也是刻意的安全默认。
+**仍需人工的一件事**（MCP 做不到，与"谁是哪个人的名字"有关）：
+
+1. 用管理员账号登录 → 「用户管理」→**逐个给账号指定「对应人员」**
+2. 指定完成后，让每个协作者登录验证"能改自己的任务"
+
+**第 1 步之前全体只读**——这是 `resource_name` 默认 `NULL` 的必然代价，也是刻意的安全默认。
+（真实库现有 4 个账号：李功林 / 张馨月 / test 是管理员，徐新是普通用户；他们都还没配「对应人员」。）
+
+**部署后仍需人工核对的两项**：
+
+- `deploy/supabase/migration.sql` 与线上库的一致性（本次已回填 `projects_select_anon` 漂移，但仍建议偶发核对一次）
+- 若日后在别的项目从零建库：直接跑这份文件即可（含 `projects_select_anon`）
 
 ---
 
@@ -1379,7 +1388,29 @@ git commit -m "chore(权限): 重建导出模板并补充权限模型与首次�
 
 ## Phase 2 — 服务端（可独立部署，owner/admin 行为不变）
 
-> 本阶段无自动化测试环境（本项目没有 Supabase MCP，SQL 只能在 Supabase SQL Editor 手工执行）。每个任务的验证靠 `psql` / SQL Editor 里的手工用例，用例写在任务里。**不要**给 SQL 编造 vitest 用例。
+> ### 验证方式（2026-10-15 更正：本阶段**可以真执行、真验证**，不要手工肉眼核对）
+>
+> 本项目已通过 **Supabase MCP 连上真实库**，并已实测以下能力：
+>
+> | 能力 | 用法 | 实测结论 |
+> |---|---|---|
+> | 应用迁移 | `supabase_apply_migration(name, query)` | 记入 `supabase_migrations.schema_migrations` |
+> | 执行 SQL | `supabase_execute_sql(query)` | **支持多语句**、**支持事务** |
+> | 模拟身份 | `select set_config('request.jwt.claims','{"sub":"<uuid>"}',false);` | ✅ `auth.uid()` 随之返回该 uuid |
+> | 让 RLS 生效 | `set local role authenticated;` … `reset role;` | ✅ 执行角色默认是 `postgres`，**会绕过 RLS 但触发器照常触发** |
+> | 安全改数据 | `begin; … ; rollback;` | ✅ `rollback` 生效，临时表被回收 |
+>
+> **四条硬性手法**（写用例时照做）：
+> 1. `auth.uid()` 读 `request.jwt.claim.sub`，兜底读 `request.jwt.claims->>'sub'` → 用 `set_config` 伪装身份
+> 2. 测**触发器**不必切角色（触发器总会触发）；测 **RLS** 才需要 `set local role authenticated`
+> 3. **任何改动类验证都必须包在 `begin; … rollback;` 里**，绝不在真实行上留痕
+> 4. 被拒的语句会中止事务 → 必须用 `do $$ begin … exception when others then … end $$;` 把它裹住，把结果写进**临时表**，最后 `select` 出来
+>
+> **库里有真实数据（4 个用户 / 1 个项目）**，验证用这两个身份：
+> - 非管理员：`徐新` = `c6ff5485-65cc-4b90-85a1-1b3d4f7df70f`（`role=user`）
+> - 管理员：`李功林` = `f65c4375-0c6f-49aa-81b5-4ea5cf4a8acb`（`role=admin`）
+>
+> 仍然**不要**给 SQL 编造 vitest 用例（Vitest 跑不到数据库）。
 
 ### Task 3: `resource_name` 列 + 敏感字段守卫触发器
 
@@ -1451,68 +1482,125 @@ create trigger profiles_guard_sensitive
   for each row execute function public.guard_profile_sensitive();
 ```
 
-- [ ] **Step 2: 在 Supabase SQL Editor 执行整份 `migration.sql`**
+- [ ] **Step 1b: 顺手修一处仓库/真实库漂移（用户已批准，2026-10-15 发现）**
 
-预期：无报错（文件整体幂等，重复执行应同样无报错）。
+真实库里有 `projects_select_anon`（`to anon using (true)`），但**仓库的 `migration.sql` 从来没有它**——
+它以独立迁移 `20260910021121 anon_readonly_projects` 应用过（见 `supabase_migrations.schema_migrations`），
+却从没回填进本文件。后果：**拿这份文件从零建库时，游客只读模式会静默失效**（anon 读不到项目 → 项目列表页空白）。
 
-- [ ] **Step 3: 手工验证 —— 加列生效且全为 NULL**
+继续追加到 `migration.sql` 末尾：
 
 ```sql
-select count(*) filter (where resource_name is null) as null_cnt, count(*) as total
+-- ---------- 5.2b 回填：anon 只读项目策略 ----------
+-- 漂移修正：线上有、仓库文件没有（独立迁移 20260910021121 anon_readonly_projects 从未回填）。
+-- 内容与线上完全一致，因此对线上是幂等重写；补上后本文件才能从零重建出当前库。
+drop policy if exists "projects_select_anon" on public.projects;
+create policy "projects_select_anon" on public.projects
+  for select to anon using (true);
+```
+
+- [ ] **Step 2: 用 MCP 应用迁移，并确认幂等**
+
+用 `supabase_apply_migration` 应用 Step 1 + Step 1b 的 SQL（名称建议 `user_permission_rbac_step1_resource_name_and_guard`）。
+
+> **若你没有 `supabase_apply_migration` / `supabase_execute_sql` 工具**：**立刻回报 NEEDS_CONTEXT**，不要退化成"写好 SQL 就算完"。控制者会代为应用并把真实输出交给你继续验证。
+
+然后再以 `supabase_execute_sql` **把同一段 SQL 重跑一遍**，确认**幂等**（第二遍不报错）。
+
+- [ ] **Step 3: 验证加列生效且全为 NULL（不回填）**
+
+```sql
+select count(*) as total,
+       count(*) filter (where resource_name is null) as null_cnt
   from public.profiles;
 ```
-预期：`null_cnt = total`（**不回填**，全部为 NULL）。
+预期：`total = 4`、`null_cnt = 4`（**迁移不回填**，见 spec §4.1 的安全口径）。
 
-- [ ] **Step 4: 手工验证 —— 普通用户改自己的 role 被拒**
+- [ ] **Step 4: 验证两条提权路径都被堵住（四种情形一次跑完）**
 
-用普通账号登录后在浏览器控制台执行（或用 curl 带该用户的 access_token）：
+按 Phase 2 的验证手法：全部包在 `begin; … rollback;` 里（**不在真实行上留痕**）；
+被拒的语句裹在内部 `begin…exception` 里（避免把外层事务带崩），结果写进临时表再 `select`。
 
-```js
-await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + MY_UID, {
-  method: 'PATCH',
-  headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + MY_TOKEN,
-             'Content-Type': 'application/json' },
-  body: JSON.stringify({ role: 'admin' })
-}).then(r => r.json());
-```
-预期：返回 `{ code: '42501', message: '仅管理员可修改角色与对应人员' }`，且 `select role from profiles where id = MY_UID` 仍是 `user`。
-
-- [ ] **Step 5: 手工验证 —— 普通用户改自己的 display_name 仍然可以**
-
-```js
-await fetch(SUPABASE_URL + '/rest/v1/profiles?id=eq.' + MY_UID, {
-  method: 'PATCH',
-  headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + MY_TOKEN,
-             'Content-Type': 'application/json' },
-  body: JSON.stringify({ display_name: '改个名字' })
-}).then(r => r.json());
-```
-预期：成功（不返回错误码），`display_name` 已更新。**这一步必须过**——触发器不能误伤改名。
-
-- [ ] **Step 6: 手工验证 —— 管理员改别人的 role 与 resource_name 正常**
-
-用管理员账号把某个普通账号设为 `admin` / 设置 `resource_name = '张三'`。
-预期：成功。
-
-- [ ] **Step 6b: 手工验证 —— INSERT 路径同样被堵**
-
-用一个"profile 行已被删掉"的账号（测试环境可让管理员先 `delete from profiles where id = '<该用户>'`），带该用户的 token 执行：
-
-```js
-await fetch(SUPABASE_URL + '/rest/v1/profiles', {
-  method: 'POST',
-  headers: { apikey: ANON_KEY, Authorization: 'Bearer ' + MY_TOKEN,
-             'Content-Type': 'application/json', Prefer: 'return=representation' },
-  body: JSON.stringify({ id: MY_UID, display_name: '我', role: 'admin', resource_name: '张三' })
-}).then(r => r.json());
-```
-预期：**插入成功，但 `role` 被强制成 `user`、`resource_name` 被强制成 `null`**（触发器静默改写，不是报错——INSERT 路径用改写而不抛错，是为了不破坏 `handle_new_user()` 之外可能存在的自建 profile 流程）。
-
-再查一次确认：
 ```sql
-select id, display_name, role, resource_name from public.profiles where id = '<该用户>';
+begin;
+create temp table t_guard(label text, result text);
+do $probe$
+declare
+  msg      text;
+  c_xin    uuid := 'c6ff5485-65cc-4b90-85a1-1b3d4f7df70f';   -- 徐新（role=user）
+  c_li     uuid := 'f65c4375-0c6f-49aa-81b5-4ea5cf4a8acb';   -- 李功林（role=admin）
+  c_claims text;
+begin
+  -- ① 非管理员改自己的 role → 应被拒（Task 3 修的就是这条）
+  c_claims := json_build_object('sub', c_xin)::text;
+  perform set_config('request.jwt.claims', c_claims, false);
+  begin
+    update public.profiles set role = 'admin' where id = c_xin;
+    msg := 'PASS(放行) <-- 不该发生！';
+  exception when others then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end;
+  insert into t_guard values ('① 非管理员改自己 role', msg);
+
+  -- ② 非管理员改自己的 display_name → 应放行（触发器不能误伤改名）
+  begin
+    update public.profiles set display_name = display_name where id = c_xin;
+    msg := 'PASS(放行)';
+  exception when others then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end;
+  insert into t_guard values ('② 非管理员改自己 display_name', msg);
+
+  -- ③ 管理员改别人的 role → 应放行
+  c_claims := json_build_object('sub', c_li)::text;
+  perform set_config('request.jwt.claims', c_claims, false);
+  begin
+    update public.profiles set role = 'admin' where id = c_xin;
+    msg := 'PASS(放行)';
+  exception when others then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end;
+  insert into t_guard values ('③ 管理员改别人 role', msg);
+
+  -- ④ INSERT 路径：先让 profile 行不存在（模拟"被管理员删过"），再自建一行写 role='admin'
+  --    整个过程都在外层事务里，rollback 后徐新的行原样回来
+  c_claims := json_build_object('sub', c_xin)::text;
+  perform set_config('request.jwt.claims', c_claims, false);
+  begin
+    delete from public.profiles where id = c_xin;
+    insert into public.profiles (id, display_name, role, resource_name)
+    values (c_xin, '徐新', 'admin', '张三');
+    msg := 'PASS(插入成功)';
+  exception when others then msg := 'REJECT: ' || sqlstate || ' / ' || sqlerrm; end;
+  insert into t_guard values ('④ 非管理员 INSERT', msg);
+
+  -- ④ 的"静默改写"必须在同一事务内查（rollback 后就没了）
+  insert into t_guard
+  select '④ 插入后的实际值', coalesce(role,'<null>') || ' / ' || coalesce(resource_name,'<null>')
+    from public.profiles where id = c_xin;
+end $probe$;
+select label, result from t_guard order by label;
+rollback;
 ```
-预期：`role = 'user'`、`resource_name = null`。
+
+预期：
+
+| 用例 | 期望结果 |
+|---|---|
+| ① 非管理员改自己 role | `REJECT: 42501 / 仅管理员可修改角色与对应人员` |
+| ② 非管理员改自己 display_name | `PASS(放行)` |
+| ③ 管理员改别人 role | `PASS(放行)` |
+| ④ 非管理员 INSERT | `PASS(插入成功)` |
+| ④ 插入后的实际值 | **`user / <null>`** —— 被静默改写成最小权限 |
+
+> ④ 的判据是"**插入成功但值被改写**"，不是"报错"。理由见 spec §7.2：INSERT 路径用改写而不抛错，
+> 是为了不破坏 `handle_new_user()` 之外可能存在的自建 profile 流程。
+> **若报错（例如 FK violation `23503`）而不是被改写**，说明探针写错了（`auth.users` 里必须真有这个 id），
+> 不是实现错了 —— 徐新的 id 在 `auth.users` 里存在，所以先 delete 再 insert 是合法的。
+
+- [ ] **Step 5: 确认真实数据未被改动**
+
+```sql
+select id, display_name, role, resource_name from public.profiles order by created_at;
+```
+预期：**4 行**，`display_name` 与 `role` 与迁移前**完全一致**（李功林/张馨月/test = admin，徐新 = user），
+`resource_name` **全为 NULL**。
+
+> 若 `徐新` 变成 `admin`，说明 Step 4 的事务回滚没生效 —— **立即回报 BLOCKED**，别继续。
 
 - [ ] **Step 7: 提交**
 
@@ -1864,13 +1952,19 @@ revoke all on function public.save_plan(uuid, jsonb) from public;
 grant execute on function public.save_plan(uuid, jsonb) to authenticated;
 ```
 
-- [ ] **Step 6: 在 SQL Editor 执行整份 `migration.sql`**
+- [ ] **Step 6: 用 MCP 应用迁移，并确认幂等**
 
-预期：无报错、可重复执行。
+用 `supabase_apply_migration`（名称建议 `user_permission_rbac_step2_save_plan`）应用 Step 1–5 的 SQL，
+然后用 `supabase_execute_sql` **把同一段重跑一遍**确认幂等（`create or replace function` 天然幂等）。
 
-- [ ] **Step 7: 手工验证 16 条校验用例（这一步不能跳）**
+> 若你没有这两个 MCP 工具：**立刻回报 NEEDS_CONTEXT**，由控制者代为应用并把真实输出交给你。
 
-`assert_plan_editable` 是纯校验函数，用 `jsonb_set` 造 diff 就能测，不必真的调 RPC。在 SQL Editor 执行：
+- [ ] **Step 7: 真跑 17 条校验用例（这一步不能跳）**
+
+`assert_plan_editable` 是**纯校验函数**（`returns void`，只 `raise`、**不写任何库**），用 `jsonb_set` 造 diff 就能测，
+不必真的调 RPC。**用 `supabase_execute_sql` 直接在生产库上跑**——它不写数据，所以安全。
+
+把下面这一整段包在 `begin; … rollback;` 里，让辅助函数 `t_try` **不留在库里**：
 
 ```sql
 -- 测试辅助：返回 PASS 或 REJECT: 原因
@@ -2050,13 +2144,24 @@ $$;
 grant execute on function public.list_resource_names() to authenticated;
 ```
 
-- [ ] **Step 2: 手工验证**
+- [ ] **Step 2: 用 MCP 应用并真跑验证**
+
+应用：`supabase_apply_migration`（名称建议 `user_permission_rbac_step3_list_resource_names`）。
+验证：`supabase_execute_sql` 执行
 
 ```sql
 select * from public.list_resource_names();
 ```
 
-预期：返回去重后的人名列表，**包含**默认数据里的「张三」「李四」…，且不含空串、无重复。
+**预期**：返回去重后的人名列表，不含空串、无重复。
+对当前真实库（只有 1 个项目），结果就是那个项目 `plan` 里 `resources[].name` 与任务 `res` 中出现过的名字集合。
+**把实际输出原样写进报告**——不要照抄默认数据的「张三」「李四」（真实库的项目内容不一定与默认数据相同）。
+
+顺带确认它不会因为空/畸形 plan 而报错：
+```sql
+select count(*) from public.list_resource_names() where name is null or btrim(name) = '';
+```
+预期：`0`。
 
 - [ ] **Step 3: 提交**
 

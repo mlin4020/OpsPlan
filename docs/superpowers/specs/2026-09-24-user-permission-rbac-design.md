@@ -369,7 +369,22 @@ create trigger profiles_guard_sensitive
 
 ### 7.4 部署动作
 
-手工在 Supabase SQL Editor 执行一次（本项目无 Supabase MCP，无法自动化）。执行后**所有账号先降为只读**，需管理员逐个指定「对应人员」才能恢复协作权限——这是 §4.1 安全口径的必然代价，用户管理页用红色「未指定」徽标驱动这次补录。
+**2026-10-15 更正**：本项目**能通过 Supabase MCP 自动化**（`supabase_apply_migration` / `supabase_execute_sql`），
+不再是"手工在 SQL Editor 执行"。迁移由实现计划里各任务的 Step 应用，并**当场跑验证用例**（含用
+`set_config('request.jwt.claims', …)` 模拟身份、`begin; … rollback;` 保证不在真实行上留痕）。
+
+执行后**所有账号先降为只读**，需管理员逐个指定「对应人员」才能恢复协作权限——这是 §4.1 安全口径的必然代价，
+用户管理页用红色「未指定」徽标驱动这次补录。**这一步 MCP 做不到**（"谁对应哪个人名"是业务决定），必须人工。
+
+### 7.5 已发现的仓库/线上漂移（2026-10-15）
+
+线上库有 `projects_select_anon`（`to anon using (true)`），但仓库的 `migration.sql` **从来没有它** ——
+它以独立迁移 `20260910021121 anon_readonly_projects` 应用过（见 `supabase_migrations.schema_migrations`），
+却从未回填进仓库文件。
+
+**后果**：拿这份文件从零建库时，游客只读模式会**静默失效**（anon 读不到项目 → 项目列表页空白）。
+
+**处理**：已作为 Task 3 Step 1b 回填进 `migration.sql`（内容与线上一致，对线上是幂等重写）。
 
 `projects_update` / `projects_insert` / `projects_delete` / `projects_select` 策略**一字不改**。
 
