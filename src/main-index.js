@@ -66,15 +66,19 @@ function renderProjects() {
   const grid = $('projGrid');
   if (!projects.length) { grid.innerHTML = '<div class="empty">还没有项目，点击右上角「新建项目」创建</div>'; return; }
   grid.innerHTML = projects.map(p => {
-    const canEdit = !!me && (p.owner_id === me.id || isAdmin());   // 未登录(me=null)一律只读
+    const isOwner = !!me && p.owner_id === me.id;
+    const canEdit = !!me && (isOwner || isAdmin());            // 未登录(me=null)一律只读
+    // 「管理」入口：所属人也要有 —— 原来只对 admin 显示，导致普通用户
+    // 建了项目却改不了自己的项目名/负责人（这是"普通用户可建项目"的实际缺口）
+    const canManage = isOwner || isAdmin();
     return '<div class="proj-card">' +
       '<div class="proj-name">' + esc(p.name || '未命名') +
-        '<span class="owner-tag">' + (canEdit ? '我的' : '只读') + '</span>' +
+        '<span class="owner-tag">' + (canEdit ? (isOwner ? '我的' : '管理员') : '只读') + '</span>' +
       '</div>' +
       '<div class="time">更新时间：' + fmtTime(p.updated_at) + '</div>' +
       '<div class="proj-actions">' +
         '<button class="btn sm primary" onclick="location.href=\'gantt.html?project=' + p.id + '\'">' + (canEdit ? '进入编辑' : '只读查看') + '</button>' +
-        (isAdmin() ? '<button class="btn sm ghost" data-edit="' + p.id + '">管理</button>' : '') +
+        (canManage ? '<button class="btn sm ghost" data-edit="' + p.id + '">管理</button>' : '') +
       '</div>' +
     '</div>';
   }).join('');
@@ -177,7 +181,10 @@ function enterApp() {
     enterGuestMode();
   }
   loadProjects();
-  if (me && isAdmin()) { loadUsers(); fillOwnerSelects(); fillResNameOptions(); }
+  // 负责人候选对「所属人」也要拉：他点「管理」时要能改项目名与负责人。
+  // 只给管理员拉的话，普通用户打开编辑弹窗会看到空下拉 → 保存即静默转交/报错。
+  if (me) fillOwnerSelects();
+  if (me && isAdmin()) { loadUsers(); fillResNameOptions(); }
 }
 
 // ---------- 游客模式（未登录，只读浏览） ----------
@@ -246,8 +253,19 @@ function openEditProj(id) {
   editingProj = p;
   $('inpEditProjName').value = p.name || '';
   const sel = $('selEditProjOwner');
-  const opt = Array.from(sel.options).find(o => o.value === p.owner_id);
+  let opt = Array.from(sel.options).find(o => o.value === p.owner_id);
+  // 所属人不在候选里（账号被删 / 资料读不到）时补一个占位项并选中：
+  // 否则下拉会停在第一个人身上，一点保存就把项目**静默转交**给陌生人。
+  if (!opt && p.owner_id) {
+    opt = document.createElement('option');
+    opt.value = p.owner_id;
+    opt.textContent = '未知账号（' + String(p.owner_id).slice(0, 8) + '）';
+    sel.appendChild(opt);
+  }
   if (opt) sel.value = p.owner_id;
+  // 删除项目仅管理员：RLS 的 projects_delete 策略就是 is_admin()，前端不放开
+  $('btnDelProj').style.display = isAdmin() ? '' : 'none';
+  $('editProjErr').textContent = '';
   $('maskEditProj').classList.add('show');
 }
 
@@ -255,8 +273,19 @@ async function saveEditProj() {
   if (!editingProj) return;
   const name = $('inpEditProjName').value.trim();
   const ownerId = $('selEditProjOwner').value;
+  const changingOwner = !!ownerId && ownerId !== editingProj.owner_id;
+
+  if (changingOwner) {
+    // 转交会让原所属人当场失去管理权（RLS 的 projects_update 只认 owner_id），
+    // 且不可自恢复 —— 必须说清楚再让他点
+    const target = Array.from($('selEditProjOwner').options).find(o => o.value === ownerId);
+    const who = target ? target.textContent : ownerId;
+    if (!confirm('确认把项目「' + (editingProj.name || '未命名') + '」转交给「' + who + '」？\n\n' +
+                 '转交后你将失去对该项目的管理权（连项目名都改不了），需要管理员才能改回。')) return;
+  }
+
   const { error } = await updateProject(editingProj.id, { name: name || editingProj.name, owner_id: ownerId });
-  if (error) { $('editProjErr').textContent = error.message; return; }
+  if (error) { $('editProjErr').textContent = errMsg(error); return; }
   closeModal('maskEditProj');
   loadProjects();
 }

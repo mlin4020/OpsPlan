@@ -224,13 +224,54 @@ describe('用户管理页接线（静态契约）', () => {
     expect(js).toMatch(/if \(!\$\('selEuRole'\)\.disabled\) patch\.role/);
   });
 
-  it('进页面就拉「对应人员」候选，保存后刷新列表与负责人下拉', () => {
-    expect(js).toMatch(/loadUsers\(\); fillOwnerSelects\(\); fillResNameOptions\(\);/);
+  it('进页面就拉「对应人员」候选', () => {
+    expect(js).toMatch(/loadUsers\(\); fillResNameOptions\(\);/);
     expect(js).toMatch(/listResourceNames\(\)/);
+  });
+
+  // 所属人也要进「管理」弹窗改负责人 —— 候选列表不能只给管理员拉（Task 14）
+  it('负责人候选对已登录用户都拉取', () => {
+    expect(js).toMatch(/if \(me\) fillOwnerSelects\(\);/);
   });
 
   it('非管理员没有进入编辑用户的路径（面板不显示 + loadUsers 直接返回）', () => {
     expect(js).toMatch(/async function loadUsers\(\) \{\s*\n[\s\S]{0,200}?if \(!isAdmin\(\)\) return;/);
     expect(js).toContain("$('adminSection').style.display = isAdmin() ? '' : 'none'");
+  });
+});
+
+// ============================================================
+// Task 14：项目页按身份收敛
+//   「普通用户能建项目」真正的缺口不在建，而在**建完之后改不了**：
+//   「管理」按钮原来只对 admin 显示，把自己建的项目锁在了自己门外。
+//   同时删除必须继续只给管理员（RLS 的 projects_delete 就是 is_admin()，前端不能放开）。
+// ============================================================
+describe('项目页按身份收敛（Task 14，静态契约）', () => {
+  const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const js = readFileSync(resolve(ROOT, 'src/main-index.js'), 'utf8');
+
+  it('「管理」按钮对所属人也显示（canManage = isOwner || isAdmin）', () => {
+    expect(js).toMatch(/const canManage = isOwner \|\| isAdmin\(\);/);
+    expect(js).toMatch(/\(canManage \?/);
+  });
+
+  it('标签三态：我的 / 管理员 / 只读（不再把管理员的项目标成「我的」）', () => {
+    expect(js).toMatch(/canEdit \? \(isOwner \? '我的' : '管理员'\) : '只读'/);
+  });
+
+  it('删除项目仍仅管理员（RLS 未放开，前端也不能露出入口）', () => {
+    expect(js).toMatch(/\$\('btnDelProj'\)\.style\.display = isAdmin\(\) \? '' : 'none';/);
+  });
+
+  it('换负责人有二次确认，且文案说明「转交后失去管理权、需管理员改回」', () => {
+    expect(js).toContain('changingOwner');
+    expect(js).toMatch(/if \(!confirm\(/);
+    expect(js).toMatch(/失去对该项目的管理权/);
+    expect(js).toMatch(/需要管理员才能改回/);
+  });
+
+  it('所属人不在候选里时补占位项（否则保存会静默转交给下拉里的第一个人）', () => {
+    expect(js).toMatch(/未知账号/);
+    expect(js).toMatch(/sel\.appendChild\(opt\)/);
   });
 });
