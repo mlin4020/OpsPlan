@@ -1222,3 +1222,111 @@ describe('scheduler: setProgress', () => {
     expect(after).toBe(before);
   });
 });
+
+describe('scheduler: 级联断链', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+  const asFull = () => userStore.set({ readonly: false, access: 'full', resourceName: '张三' });
+
+  // ⚠️ 凡是要造"别人的任务"（res:['李四']）的用例，必须**先建链、再 asCollab()**：
+  //   addTask 的守卫按"打算派给谁"判（决策 B：新增任务负责人默认自己），协作者张三
+  //   新建一条 res:['李四'] 的任务会被**正确地**拒绝。若在 asCollab() 之后才建那条
+  //   "别人的任务"，用例测的就变成 addTask 的守卫，而不是级联断链。
+  //   userStore.reset() 默认 access:'full'，所以 asCollab() 之前建链天然是全权身份。
+  //   例外：全部 res 都是张三的用例（如「下游是自己人时不断链」）可在 asCollab() 之后建。
+  //
+  // 🧨 另一处坑（2026-10-23 实测）：`addTask` 默认 `manual: true`（避免被一键自动计划冲掉），
+  //   而 `recomputeAffected` 对手动任务的行为是"保持现状、不重排"。于是"下游是自己人"时
+  //   B 虽然进了 affected 却原地不动 —— 于是"断链"与"不断链"在日期上无法区分，用例测不出东西。
+  //   凡是要看 B 被真正重排的用例，建 B 时必须显式 `manual: false`（自动任务才会被重算）。
+  //
+  // 另注意：`cascade` 只把**锚点**挪到新日期，锚点本身不会被 recompute 二次落位，
+  //   所以日期取工作日时不要用周一（非工作日起点不会被吸附），用 2026-09-21（周一）这类**工作日**。
+
+  it('全权用户：级联照旧，没有任何钉住（回归）', () => {
+    const sched = makeSched();
+    asFull();
+    // m1-dev(钱七) → m1-sit(吴十)：都是别人的任务，全权用户照常全部重排
+    const before = sched.getTask('m1-sit').s;
+    const r = sched.cascade('m1-dev', '2026-09-20');
+    expect(r.pinned).toEqual([]);
+    expect(sched.getTask('m1-sit').s).not.toBe(before);
+  });
+
+  it('协作者拖自己的任务：下游他人任务被钉住且不再下探', () => {
+    const sched = makeSched();
+    // 造一条链：我的任务 A(张三) → 别人的 B(李四) → 我的 C(张三)
+    // 建链必须在 asCollab() 之前（协作者不能新建派给别人的任务）
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    // B、C 必须是自动任务，否则 recompute 会因 manual 而保持现状，"断链"无从观测
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.addTask({ mod: '官网改版', p: 'uat', start: '2026-09-03', dur: 1, res: ['张三'], id: 'C', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    sched.saveTask('C', { dep: [{ id: 'B', lag: 0 }] });
+    asCollab();   // ← 之后只做"拖动"
+
+    const bBefore = sched.getTask('B').s;
+    const cBefore = sched.getTask('C').s;
+    const r = sched.cascade('A', '2026-09-21');            // 工作日（周一），锚点原样落位
+
+    expect(r.pinned).toEqual(['B']);                       // B 被钉住
+    expect(sched.getTask('B').manual).toBe(true);
+    expect(sched.getTask('B').s).toBe(bBefore);            // B 的日期没动
+    expect(sched.getTask('C').s).toBe(cBefore);            // 断链 → C 也没动
+    expect(sched.getTask('A').s).toBe('2026-09-21');       // 我的 A 正常落位
+  });
+
+  it('断链后会产生「依赖违反」问题（进风险面板）', () => {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    asCollab();   // ← 建链后才切身份
+    const r = sched.cascade('A', '2026-09-21');
+    expect(r.pinned).toEqual(['B']);                       // 前提：确实断链了
+    const probs = sched.detectProblems();                  // API 名为 detectProblems（无 detect 别名）
+    expect(probs.some(p => p.type === 'depend' && p.taskId === 'B')).toBe(true);
+  });
+
+  it('下游是自己人时不断链', () => {
+    const sched = makeSched();
+    asCollab();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    // B 必须自动，否则 recompute 因 manual 保持现状 → 与"断链"结果完全相同，用例测不出东西
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['张三'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    const r = sched.cascade('A', '2026-09-21');
+    expect(r.pinned).toEqual([]);
+    expect(sched.getTask('B').s).toBe('2026-09-22');       // 被级联推到前置结束的次日
+  });
+
+  it('previewCascade 与 cascade 用同一条影响集合（预览必须等于落位）', () => {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B' });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    asCollab();   // ← 建链后才切身份
+    const preview = [...sched.previewCascade('A', '2026-09-21')].sort();
+    sched.cascade('A', '2026-09-21');
+    // 预览里不应出现 B（它不会被重排）
+    expect(preview).not.toContain('B');
+    expect(preview).toContain('A');
+  });
+
+  it('previewCascade 不产生副作用（预览不写 manual）', () => {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    // B 必须自动：若 B 本来就是 manual，这条用例同样恒真（测不出 dryRun 有没有生效）
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    asCollab();   // ← 建链后才切身份
+    const preview = sched.previewCascade('A', '2026-09-21');
+    expect(preview.has('A')).toBe(true);                   // 前提：预览真的跑起来了
+    expect(sched.getTask('B').manual).toBe(false);         // 但没写 manual
+    // 对照：落位时同样断链，B 会被钉住 → 证明上面的 false 不是"断链压根没触发"
+    const r = sched.cascade('A', '2026-09-21');
+    expect(r.pinned).toEqual(['B']);
+    expect(sched.getTask('B').manual).toBe(true);
+  });
+});

@@ -200,8 +200,9 @@ export function createMutations(ctx) {
     }
 
     // 4. 重建索引并级联重排本任务及其后置子图
+    //    collectAffected 是"唯一入口"：协作者模式内部自动断链并返回 pinned，这里只取 affected
     ctx.collect();
-    ctx.recomputeAffected(ctx.collectAffected(taskId));
+    ctx.recomputeAffected(ctx.collectAffected(taskId).affected);
     ctx.save();
   }
 
@@ -527,7 +528,7 @@ export function createMutations(ctx) {
           // 先钉再 collect：补建的上线里程碑要先进索引，collectAffected 才认得出它的后置
           const msId = pinModToDate(mo, v.date);
           ctx.collect();
-          ctx.recomputeAffected(ctx.collectAffected(msId));
+          ctx.recomputeAffected(ctx.collectAffected(msId).affected);
         }
       }
     }
@@ -671,11 +672,17 @@ export function createMutations(ctx) {
 
   // 被钉过上线日的里程碑，其时间变化会波及依赖它的任务（回归验证这类收口任务）→ 统一级联一次
   function cascadeFrom(ids) {
-    if (!ids || !ids.length) return;
+    if (!ids || !ids.length) return { pinned: [] };
     ctx.collect();
     const affected = new Set();
-    ids.forEach(id => ctx.collectAffected(id).forEach(x => affected.add(x)));
+    const pinned = [];
+    ids.forEach(id => {
+      const r = ctx.collectAffected(id);
+      r.affected.forEach(x => affected.add(x));
+      r.pinned.forEach(x => { if (!pinned.includes(x)) pinned.push(x); });
+    });
     ctx.recomputeAffected(affected);
+    return { pinned };
   }
 
   // 新建版本：名称唯一、上线日必填；opts.mods 可一次性带上成员（弹窗里勾选）
@@ -826,21 +833,23 @@ export function createMutations(ctx) {
 
   // 拖拽调整工作量（持续时间）：edge='l' 拖左边缘改开始日期，edge='r' 拖右边缘改结束日期；锁定手动并级联重算后置
   function resizeTask(taskId, edge, date) {
-    if (!assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
-    if (!t || t.isMs) return;
+    if (!t || t.isMs) return { pinned: [] };
+    if (!assertEditable(false, { kind: 'task', task: t })) return { pinned: [] };
     const nd = F(date);
     if (edge === 'l') {
-      if (nd > F(t.e)) return;          // 不允许翻转到结束日期之后
+      if (nd > F(t.e)) return { pinned: [] };          // 不允许翻转到结束日期之后
       t.s = fmt(nd);
     } else {
-      if (nd < F(t.s)) return;          // 不允许翻转到开始日期之前
+      if (nd < F(t.s)) return { pinned: [] };          // 不允许翻转到开始日期之前
       t.e = fmt(nd);
     }
     t.manual = true;
     if (typeof t.w === 'number') t.w = W.workDays(t.s, t.e);   // 工作量（人天）
-    ctx.recomputeAffected(ctx.collectAffected(taskId));
+    const { affected, pinned } = ctx.collectAffected(taskId);
+    ctx.recomputeAffected(affected);
     ctx.save();
+    return { pinned };
   }
 
   // ---------- 资源库（人员 / 职位）管理 ----------

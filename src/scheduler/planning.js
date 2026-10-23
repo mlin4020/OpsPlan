@@ -10,6 +10,8 @@
 // ============================================================
 import { topoSort } from './topo.js';
 import { F as baseF, fmt, addDays } from '../core/dates.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canTouchTask } from '../utils/permission.js';
 
 // 兼容 Date 输入的日期解析（与源 gantt-scheduler.js 的 F 一致：Date 直接克隆，字符串按 YYYY-MM-DD 解析）
 // 源 F 支持 Date，而 core/dates.js 的 F 仅支持字符串，故在此薄封装补齐 Date 分支
@@ -126,23 +128,70 @@ export function createPlanning(ctx) {
     }
   }
 
-  // 从 anchorId 出发沿"后置边"(pred→succ) 可达的受影响集合（含自身）
-  function collectAffected(anchorId) {
+  // 需求名 → 需求对象（里程碑判定需要知道它属于哪个需求）
+  function modByName(name) {
+    return (getState().modules || []).find(m => m.name === name) || null;
+  }
+
+  // pred→succ 映射（多级递归用）。所有任务的依赖都登记，两者共用同一份构建口径
+  function buildSuccIndex() {
     const succ = {};
-    // 构建完整的 pred→succ 映射（所有任务的依赖都登记），支持多级递归
     ctx.tasks.forEach(t => (t.dep || []).forEach(d => {
       if (!ctx.tasksById[d.id]) return;
       (succ[d.id] = succ[d.id] || []).push(t.id);
     }));
+    return succ;
+  }
+
+  // 只有"协作者"才断链：
+  //   全权用户 → 完整级联（行为与改造前逐字节相同）
+  //   只读用户 → 操作在第一道守卫就被拦下，到不了这里
+  //   access 未显式给出时 ctxOf 返回 full → Task 9 之前本函数恒为 false，零行为变化
+  function isCollabMode() { return ctxOf(userStore.state).access === 'collab'; }
+
+  // 唯一入口：从 anchorId 出发沿"后置边"(pred→succ) 可达的受影响集合（含自身）。
+  // 安全判定放在这里而不是散在各调用点 —— 调用方无从绕过（与 Task 7 的 default→最严 同一思路）：
+  //   全权 → 全量 BFS，pinned 恒为 []
+  //   协作者 → 断链 BFS：遇到"我无权编辑"的任务就钉成手动并停止该分支，不重排它也不继续下探。
+  //            为什么断链就够：被钉住的节点日期没变 → 它下游的依赖输入也没变 → 下游没有变动的理由。
+  //            钉住是唯一被特许的跨人写入（设计文档 §6.4 特许①），服务端会校验它确实被级联影响到。
+  //   dryRun：预览用，只收集 pinned 不写 manual（预览绝不能有副作用）
+  function collectAffected(anchorId, opts) {
+    const dry = !!(opts && opts.dryRun);
+    if (!isCollabMode()) {
+      // 全权：原全量 BFS。多算了 opts 也不管，行为与改造前逐字节相同
+      const succ = buildSuccIndex();
+      const affected = new Set([anchorId]);
+      const stack = [anchorId];
+      while (stack.length) {
+        const id = stack.pop();
+        (succ[id] || []).forEach(n => {
+          if (!affected.has(n)) { affected.add(n); stack.push(n); }
+        });
+      }
+      return { affected, pinned: [] };
+    }
+    const succ = buildSuccIndex();
+    const c = ctxOf(userStore.state);
     const affected = new Set([anchorId]);
+    const pinned = [];
     const stack = [anchorId];
     while (stack.length) {
       const id = stack.pop();
       (succ[id] || []).forEach(n => {
-        if (!affected.has(n)) { affected.add(n); stack.push(n); }
+        if (affected.has(n)) return;
+        const t = ctx.tasksById[n];
+        if (!t) return;
+        if (!canTouchTask(t, modByName(t.mod), c)) {
+          if (!t.manual && !dry) t.manual = true;   // 钉住；预览不写
+          if (!pinned.includes(n)) pinned.push(n);
+          return;                                   // 断链：不加入 affected、不继续下探
+        }
+        affected.add(n);
+        stack.push(n);
       });
     }
-    return affected;
+    return { affected, pinned };
   }
 
   // ---------- 对外操作 ----------
@@ -157,28 +206,32 @@ export function createPlanning(ctx) {
   // 拖拽落位：锁定手动日期并级联重算后置子图。
   // 关键语义：工作量（工作日数）恒定，时间周期（日历天数）随新位置含有的周末/节假日自动伸缩。
   function cascade(anchorId, newStart) {
-    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(anchorId) })) return;
     const t = ctx.getTask(anchorId);
-    if (!t || t.isMs) return;
+    if (!t || t.isMs) return { pinned: [] };
+    if (!ctx.assertEditable(false, { kind: 'task', task: t })) return { pinned: [] };
     t.manual = true;
     const work = W.workDays(t.s, t.e);                       // 拖动前的工作量
     const startD = F(newStart);                              // 兼容 Date 与 'YYYY-MM-DD'
     t.s = fmt(startD);
     t.e = fmt(W.spanEndByWorkdays(startD, work));            // 结束 = 起点起第 work 个工作日
     if (typeof t.w === 'number') t.w = work;                 // 工作量（人天）同步持久化
-    recomputeAffected(collectAffected(anchorId));
+    const { affected, pinned } = collectAffected(anchorId);
+    recomputeAffected(affected);
     ctx.save();
+    return { pinned };
   }
 
   // 自动调整至资源可用的时间：解除锁定并重排该任务及其后置子图
   function resolveAuto(taskId) {
-    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
-    if (!t) return;
+    if (!t) return { pinned: [] };
+    if (!ctx.assertEditable(false, { kind: 'task', task: t })) return { pinned: [] };
     t.manual = false;
     t.ignore = false;
-    recomputeAffected(collectAffected(taskId));
+    const { affected, pinned } = collectAffected(taskId);
+    recomputeAffected(affected);
     ctx.save();
+    return { pinned };
   }
 
   // 忽略：保留现状并淡化标记
@@ -202,7 +255,9 @@ export function createPlanning(ctx) {
   function previewCascade(anchorId, newStart) {
     const t = ctx.getTask(anchorId);
     if (!t || t.isMs) return new Set();
-    const affected = collectAffected(anchorId);
+    // 预览必须与落位用同一条影响集合，否则会出现"预览在这、松手跑到那"；
+    // dryRun：只收集 pinned，绝不写 manual（预览不能有副作用）
+    const { affected } = collectAffected(anchorId, { dryRun: true });
     const backup = {};
     affected.forEach(id => {
       const tt = ctx.tasksById[id];
@@ -240,7 +295,8 @@ export function createPlanning(ctx) {
     if (!t || t.isMs) return new Set();
     const nd = F(date);
     if ((edge === 'l' && nd > F(t.e)) || (edge === 'r' && nd < F(t.s))) return new Set();
-    const affected = collectAffected(taskId);
+    // 同 previewCascade：与落位共用影响集合，且不得写 manual
+    const { affected } = collectAffected(taskId, { dryRun: true });
     const backup = {};
     affected.forEach(id => {
       const tt = ctx.tasksById[id];

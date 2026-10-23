@@ -148,6 +148,15 @@ function onMouseMove(e, deps) {
   if (drag.moved) gsc.scrollLeft = drag.sl - dx;
 }
 
+// 钉住他人任务时必须说出来：否则"我碰了别人的任务"这件事在界面上完全不可见，
+// 出争议时查不出是谁引起的（被钉的任务自带「手动」锁图标，那是持久线索）。
+// 走 toast：同步状态区只显示"已同步+时间+保存人"，塞进 msg 的内容根本不会渲染。
+function notifyPinned(deps, r) {
+  const n = (r && Array.isArray(r.pinned)) ? r.pinned.length : 0;
+  if (!n || typeof deps.toast !== 'function') return;
+  deps.toast(`已钉住 ${n} 条他人任务为手动，风险面板会报出依赖冲突`);
+}
+
 // 全局 mouseup：按当前拖拽态落位
 function onMouseUp(deps) {
   const { sched, getCtx, gsc, render } = deps;
@@ -172,7 +181,7 @@ function onMouseUp(deps) {
       const days = Math.round((lastMouseX - barResize.startClientX) / dayW);
       if (days !== 0) {
         const newDate = sched.addDays(barResize.anchorDate, days);
-        sched.resizeTask(barResize.taskId, barResize.edge, newDate);
+        notifyPinned(deps, sched.resizeTask(barResize.taskId, barResize.edge, newDate));
       }
       armSuppress();
       clearGhost(deps);
@@ -188,7 +197,7 @@ function onMouseUp(deps) {
       const days = Math.round((lastMouseX - barDrag.startClientX) / dayW);
       if (days !== 0) {
         const newStart = sched.addDays(barDrag.startD, days);
-        sched.cascade(barDrag.taskId, newStart);
+        notifyPinned(deps, sched.cascade(barDrag.taskId, newStart));
       }
       armSuppress();
       clearGhost(deps);
