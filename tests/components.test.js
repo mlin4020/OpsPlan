@@ -12,6 +12,10 @@ import { createScheduler } from '../src/scheduler/index.js';
 import { bindDrawers, paintModHover, pickDragHandle } from '../src/components/drawers.js';
 import { isPanTarget } from '../src/components/drag.js';
 import { bindReqPage } from '../src/components/req-page.js';
+import {
+  READONLY_BTN_IDS, FULL_ONLY_BTN_IDS, refreshUI, leaveReadonly
+} from '../src/utils/readonly.js';
+import { ctxOf } from '../src/utils/permission.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMP = resolve(ROOT, 'src/components');
@@ -298,5 +302,118 @@ describe('req-page: 台账事件委托', () => {
     bindReqPage(deps);
     expect(deps.viewState.reqFilter.scope).toBe('all');
     expect(deps.viewState.reqSort.key).toBe('group');   // 默认「进行中优先」，不再按甘特图顺序
+  });
+});
+
+// ============================================================
+// 工具栏按钮分组（Task 10）
+//   两组的分界线不是"只读与否"，而是"这个动作只影响我自己的东西，还是会动整份 plan"：
+//     READONLY 组 = 新增类 + 问题面板（协作者仍要能用）
+//     FULL_ONLY 组 = 自动计划 / 撤销重做 / 整份导入 / 资源库（只影响全权）
+//   注：「周期」按钮早就被 cycle.js 的改造删掉了，不在任何一组里。
+// ============================================================
+describe('readonly: 按钮分组', () => {
+  it('两组互不重叠', () => {
+    const a = new Set(READONLY_BTN_IDS);
+    expect(FULL_ONLY_BTN_IDS.some(id => a.has(id))).toBe(false);
+  });
+
+  it('新增类按钮属于 READONLY 组（协作者仍要能用）', () => {
+    expect(READONLY_BTN_IDS).toContain('btnAddTask');
+    expect(READONLY_BTN_IDS).toContain('btnAddModule');
+  });
+
+  it('动整份 plan 的按钮属于 FULL_ONLY 组', () => {
+    ['btnAutoPlan', 'btnUndo', 'btnRedo', 'btnImport', 'btnResLib']
+      .forEach(id => expect(FULL_ONLY_BTN_IDS).toContain(id));
+  });
+
+  // 拆分不是"删按钮"：原 EDIT_BTN_IDS 的 9 个必须一个不少地落在两组之一的并集里
+  it('两组并集覆盖原有 9 个编辑按钮', () => {
+    const ids = new Set([...READONLY_BTN_IDS, ...FULL_ONLY_BTN_IDS]);
+    ['btnAddTask', 'btnAddModule', 'btnAutoPlan', 'btnProblems', 'btnResLib', 'btnImport', 'btnUndo', 'btnRedo', 'mAddTask']
+      .forEach(id => expect(ids.has(id)).toBe(true));
+  });
+});
+
+// 最小 DOM 替身：只需要 getElementById + body.classList（refreshUI 的全部接触面）
+function fakeDoc(ids) {
+  const els = {};
+  ids.forEach(id => {
+    const set = new Set();
+    els[id] = {
+      style: {},
+      classList: {
+        toggle(c, on) { if (on) set.add(c); else set.delete(c); },
+        has: c => set.has(c)
+      }
+    };
+  });
+  return {
+    els,
+    getElementById: id => els[id] || null,
+    querySelector: () => null,
+    body: { classList: { toggle() {} } }
+  };
+}
+
+const allBtnIds = () => [...READONLY_BTN_IDS, ...FULL_ONLY_BTN_IDS];
+
+describe('readonly: refreshUI 的两组灰化口径', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  it('协作者：READONLY 组不灰（要能新增任务/需求），FULL_ONLY 组灰', () => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+    const doc = fakeDoc(allBtnIds());
+    refreshUI(doc);
+    READONLY_BTN_IDS.forEach(id => expect(doc.els[id].classList.has('disabled')).toBe(false));
+    FULL_ONLY_BTN_IDS.forEach(id => expect(doc.els[id].classList.has('disabled')).toBe(true));
+  });
+
+  it('只读：两组都灰', () => {
+    userStore.set({ readonly: true, access: 'readonly' });
+    const doc = fakeDoc(allBtnIds());
+    refreshUI(doc);
+    allBtnIds().forEach(id => expect(doc.els[id].classList.has('disabled')).toBe(true));
+  });
+
+  it('全权：两组都不灰', () => {
+    userStore.set({ readonly: false, access: 'full', role: 'admin' });
+    const doc = fakeDoc(allBtnIds());
+    refreshUI(doc);
+    allBtnIds().forEach(id => expect(doc.els[id].classList.has('disabled')).toBe(false));
+  });
+});
+
+// ============================================================
+// Task 10 Step 4a：leaveReadonly 的写入侧修复
+//   leaveReadonly 原来只写 readonly:false、不写 access。ctxOf 的兜底
+//   （`s.access` 不是 collab/full 时一律视作 full）于是把 access='readonly'
+//   翻成 full —— "只读用户点一下切换就变成全权"。
+//   修法只能是写入侧用真源重算 access；ctxOf 的兜底被 Task 1 的用例锁着，不能动。
+// ============================================================
+describe('readonly: leaveReadonly 不得把只读用户翻成 full', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  it('只读身份调用后：access 仍是 readonly，readonly 仍为 true，ctxOf 也仍是只读', () => {
+    userStore.set({ role: 'user', isOwner: false, resourceName: '', access: 'readonly', readonly: true });
+    leaveReadonly(fakeDoc([]));
+    expect(userStore.state.access).toBe('readonly');
+    expect(userStore.state.readonly).toBe(true);
+    expect(ctxOf(userStore.state).access).toBe('readonly');
+  });
+
+  it('协作者调用后：access 重算为 collab 且 readonly 为 false', () => {
+    userStore.set({ role: 'user', isOwner: false, resourceName: '张三', readonly: true });
+    leaveReadonly(fakeDoc([]));
+    expect(userStore.state.access).toBe('collab');
+    expect(userStore.state.readonly).toBe(false);
+  });
+
+  it('所属人调用后：access 重算为 full（不是"只把 readonly 置 false"）', () => {
+    userStore.set({ role: 'user', isOwner: true, resourceName: '', readonly: true });
+    leaveReadonly(fakeDoc([]));
+    expect(userStore.state.access).toBe('full');
+    expect(userStore.state.readonly).toBe(false);
   });
 });

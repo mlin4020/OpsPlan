@@ -31,6 +31,7 @@ import { getSession, getUser, getProfile } from './services/auth.js';
 import { getProject } from './services/projects.js';
 import { createPlanSync } from './services/plan-sync.js';
 import { resolveAccess, ACCESS } from './utils/permission.js';
+import { refreshUI as refreshReadonlyUI } from './utils/readonly.js';
 
 // 解析项目参数
 const params = new URLSearchParams(location.search);
@@ -257,6 +258,11 @@ function boot() {
       resourceName: userStore.state.resourceName
     });
     userStore.set({ isOwner, access, readonly: access === ACCESS.READONLY });
+    // access 就绪后立刻刷新两组按钮的灰化状态。
+    // refreshUI 原本只在 enterReadonly / leaveReadonly 里被调，而协作者的 readonly === false
+    // → 两个入口都不会走 → FULL_ONLY 那组（自动计划/撤销/导入/资源库）永远不会灰掉。
+    // 必须在 wireUI 之前：wireUI 可能按只读状态装配组件，按钮状态要先生效。
+    refreshReadonlyUI(document);
 
     // 显示服务器工具栏（返回列表 / 从服务器刷新）
     const serverGroup = document.getElementById('serverGroup');
