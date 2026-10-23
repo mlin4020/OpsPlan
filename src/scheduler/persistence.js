@@ -27,6 +27,23 @@ export function createPersistence(ctx) {
     };
   }
 
+  // 只写 localStorage 兜底、**不**推送服务端。
+  //   save() 的防抖回调里：先 persistLocal() 再 pushToServer()；
+  //   plan-sync 回滚成功后也调它，把服务器版本落回本地兜底 —— 否则 localStorage 里
+  //   留着那份"被服务端拒绝的 plan"，离线打开或服务端加载失败时用户会看到被拒的改动。
+  //   ⚠️ 回滚链路**绝不能**改调 ctx.save()：那会再推一次 → 被拒 → 再回滚，死循环。
+  function persistLocal() {
+    try {
+      localStorage.setItem(ctx.KEY(), JSON.stringify({
+        v: 1, calcVer: ctx.CALC_VER, savedAt: Date.now(),
+        modules: getState().modules,
+        resources: getState().resources,
+        versions: getState().versions
+      }));
+      return true;
+    } catch (e) { return false; }  // 忽略写入失败（隐私模式/配额满）
+  }
+
   let saveTimer = null;
   function save() {
     // 立即通知订阅者重绘（store 驱动渲染层感知变更）
@@ -34,14 +51,7 @@ export function createPersistence(ctx) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       // 1) 本地兜底：始终写入 localStorage（离线/未配置 Supabase 也不中断）
-      try {
-        localStorage.setItem(ctx.KEY(), JSON.stringify({
-          v: 1, calcVer: ctx.CALC_VER, savedAt: Date.now(),
-          modules: getState().modules,
-          resources: getState().resources,
-          versions: getState().versions
-        }));
-      } catch (e) { /* 忽略写入失败 */ }
+      persistLocal();
       // 2) 服务端同步：仅项目模式 + Supabase 可用 + 非只读时推送（由注入的 pushToServer 决定）
       ctx.pushToServer();
     }, 300);
@@ -104,5 +114,5 @@ export function createPersistence(ctx) {
     if (ctx.recordInitial) ctx.recordInitial();
   }
 
-  return { save, load, buildPayload, exportJSON, importJSON, resetToDefault };
+  return { save, persistLocal, load, buildPayload, exportJSON, importJSON, resetToDefault };
 }

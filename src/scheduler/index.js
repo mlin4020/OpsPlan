@@ -154,6 +154,9 @@ export function createScheduler({ planStore, userStore, W, sync }) {
     archiveVersionMods: mutations.archiveVersionMods,
     detectProblems: detect,
     save: (skipHistory) => persistence.save(skipHistory),
+    // 只写 localStorage 兜底、不推送服务端。供 plan-sync 回滚后把服务器版本落回本地
+    // （若走 save() 会再推一次 → 被拒 → 再回滚，死循环）
+    persistLocal: persistence.persistLocal,
     load: persistence.load,
     loadFromServer,
     pushToServer,

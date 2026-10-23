@@ -5,13 +5,17 @@ import { planStore } from '../src/store/plan-store.js';
 import { userStore } from '../src/store/user-store.js';
 
 // mock projects 服务（避免触碰真实 supabase client）
+// isDenied / errMsg **不 mock、走真实实现**：把它们替换成 spy 会让"权限拒绝才回滚"的用例
+// 变成"我喂 true 它就回滚"的同义反复，真实判定逻辑（本任务核心产出）零覆盖。
+// 真实实现的纯函数用例见 tests/projects-err.test.js。
 const mocks = vi.hoisted(() => ({
   loadPlan: vi.fn(),
-  savePlan: vi.fn(),
-  errMsg: vi.fn(e => e && e.message || ''),
-  isDenied: vi.fn(() => false)
+  savePlan: vi.fn()
 }));
-vi.mock('../src/services/projects.js', () => mocks);
+vi.mock('../src/services/projects.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, loadPlan: mocks.loadPlan, savePlan: mocks.savePlan };
+});
 
 import { createPlanSync } from '../src/services/plan-sync.js';
 
@@ -159,49 +163,56 @@ describe('supabase client 单例', () => {
 });
 
 describe('plan-sync: 服务端权限拒绝 → 回滚', () => {
+  // 注：isDenied / errMsg 走真实实现（见文件顶部的 vi.mock），
+  // 断言的是"给定的 error 在真实判定下会不会触发回滚"，而不是 mock 的返回值。
   beforeEach(() => {
     planStore.reset();
     userStore.reset();
     mocks.loadPlan.mockReset();
     mocks.savePlan.mockReset();
-    mocks.isDenied.mockReset();
-    mocks.isDenied.mockReturnValue(false);
-    mocks.errMsg.mockReset();
-    mocks.errMsg.mockImplementation(e => (e && e.message) || '');
   });
 
-  it('被拒时用服务器版本覆盖本地（回滚），并透出服务端的具体原因', async () => {
+  it('被拒（42501）时用服务器版本覆盖本地（回滚），并透出服务端的具体原因', async () => {
     userStore.set({ projectId: 'p1' });
     planStore.set({ modules: [{ name: '本地乱改的', bars: [] }], resources: [], versions: [] });
     mocks.savePlan.mockResolvedValue({ error: { code: '42501', message: '无权修改他人负责的任务（id=x）' } });
-    mocks.isDenied.mockReturnValue(true);
     mocks.loadPlan.mockResolvedValue({
       data: { plan: { modules: [{ name: '服务器版本', bars: [] }], resources: [], versions: [] } },
       error: null
     });
 
     const { sync, onSyncStatus } = makeDeps();
+    // 修复轮 1：回滚已纳入 pushToServer 的返回链，resolve 时回滚已完成，不再需要 setTimeout 等
     const ok = await sync.pushToServer();
 
     expect(ok).toBe(false);
     expect(onSyncStatus).toHaveBeenCalledWith('fail', {
       msg: expect.stringContaining('无权修改他人负责的任务（id=x）')
     });
-    // 回滚是异步的，等一个 tick
-    await new Promise(r => setTimeout(r, 0));
     expect(mocks.loadPlan).toHaveBeenCalledWith('p1');
     expect(planStore.state.modules[0].name).toBe('服务器版本');
   });
 
-  it('非权限类失败不回滚（网络抖动不该丢掉本地改动）', async () => {
+  it('非权限类失败（57014 超时）不回滚（网络抖动不该丢掉本地改动）', async () => {
     userStore.set({ projectId: 'p1' });
     planStore.set({ modules: [{ name: '本地改动', bars: [] }], resources: [], versions: [] });
     mocks.savePlan.mockResolvedValue({ error: { code: '57014', message: '超时' } });
-    mocks.isDenied.mockReturnValue(false);
 
     const { sync } = makeDeps();
     await sync.pushToServer();
     await new Promise(r => setTimeout(r, 0));
+
+    expect(mocks.loadPlan).not.toHaveBeenCalled();
+    expect(planStore.state.modules[0].name).toBe('本地改动');
+  });
+
+  it('P0002「项目不存在」也不回滚（code 不是 42501、文案不含权限关键词）', async () => {
+    userStore.set({ projectId: 'p1' });
+    planStore.set({ modules: [{ name: '本地改动', bars: [] }], resources: [], versions: [] });
+    mocks.savePlan.mockResolvedValue({ error: { code: 'P0002', message: '项目不存在' } });
+
+    const { sync } = makeDeps();
+    await sync.pushToServer();
 
     expect(mocks.loadPlan).not.toHaveBeenCalled();
     expect(planStore.state.modules[0].name).toBe('本地改动');
