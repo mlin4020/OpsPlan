@@ -28,3 +28,5 @@ supabase-config.js
 *.log
 feishu-config.js
 deploy/*
+assets/screenshots/排期计划.json
+docs/2026年10月工作计划.md
