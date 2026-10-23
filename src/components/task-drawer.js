@@ -19,7 +19,7 @@
 import { milestoneName } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
 import { closeDrawer, getPanel, onDrawerClose, setPanel } from './drawer-shell.js';
-import { openProblemDrawer, renderProbList, updateProblemBadge } from './problem-drawer.js';
+import { openProblemDrawer, renderProbList, updateProblemBadge, fixableTaskIds } from './problem-drawer.js';
 import { mergePinned, notifyPinned } from '../utils/pinned.js';
 import { userStore } from '../store/user-store.js';
 import { ctxOf, canTouchTask } from '../utils/permission.js';
@@ -562,10 +562,25 @@ function bindTaskDrawerControls(deps) {
   on('btnCloseDrawer', () => closeDrawer(deps));
   on('drawerMask', () => closeDrawer(deps));
   on('btnAutoFixAll', () => {
-    const ids = [...new Set(deps.sched.problems().map(p => p.taskId))];
+    // 「全部自动调整」只处理"我有权编辑"的那些问题（单条那颗在 Task 11 已收敛）。
+    // 批量不收敛的后果比单条严重得多：一次点击会把别人的任务全解锁重排，
+    // 而事后从界面上完全看不出"是谁点了、改了哪几条"。
+    const allIds = [...new Set(deps.sched.problems().map(p => p.taskId))];
+    const ids = fixableTaskIds(deps);
+    if (!ids.length) {
+      // 置灰状态下的点击：说明原因，而不是静默 —— 静默就是"看起来能点、点了没反应"
+      deps.toast(allIds.length ? '这些问题都不归你负责，无法调整' : '当前没有排期问题');
+      return;
+    }
+    const skipped = allIds.length - ids.length;
     // 逐条收集：resolveAuto 在协作者模式下会钉住下游他人任务，批量处理时也要合并提示
     const results = ids.map(id => deps.sched.resolveAuto(id));
-    notifyPinned(deps, mergePinned(results), `已自动调整 ${ids.length} 项问题`);
+    notifyPinned(
+      deps, mergePinned(results),
+      skipped
+        ? `已自动调整 ${ids.length} 项问题（另有 ${skipped} 项不归你负责，未处理）`
+        : `已自动调整 ${ids.length} 项问题`
+    );
     renderProbList(deps);
     updateProblemBadge(deps);
     deps.render();

@@ -33,6 +33,47 @@ export function updateProblemBadge(deps) {
   });
 }
 
+// 这条问题归不归我处理。与列表里是否渲染「自动调整 / 忽略」**同一个判据**：
+// 两处各写一套的话，会出现"列表没有按钮、一键修复却改了它"的静默越权。
+export function canFixProblem(taskId, deps) {
+  const t = deps.sched.getTask(taskId);
+  return t ? canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state)) : false;
+}
+
+// 去重后的「我有权处理」任务 id（同一任务可能挂着多条问题）。
+// 批量修复的范围就用它 —— Task 11 只收敛了单条，批量那一颗原本是"改全项目"。
+export function fixableTaskIds(deps) {
+  const seen = new Set();
+  const out = [];
+  deps.sched.problems().forEach(p => {
+    if (seen.has(p.taskId)) return;
+    seen.add(p.taskId);
+    if (canFixProblem(p.taskId, deps)) out.push(p.taskId);
+  });
+  return out;
+}
+
+// 「全部自动调整」按钮的可操作状态：一条都改不了就置灰 + 说明原因。
+// 置灰原因必须写出来 —— 「为什么这个按钮点不动」在界面上没有别的线索，
+// 而这恰恰是协作者最常见的困惑（他看到问题列表里有内容，却以为是功能坏了）。
+// 刻意**不用** .disabled class：那条规则带 pointer-events:none，鼠标扫不到元素，
+// 浏览器就不会弹 title —— 置灰的同时把"为什么"藏起来，等于没解释。
+// 因此改用 .unavailable（只降透明度、不禁指针），点击由守卫拦住并 toast 说明原因。
+export function syncAutoFixAllBtn(deps) {
+  const btn = deps.getEl('btnAutoFixAll');
+  if (!btn) return;
+  const total = deps.sched.problems().length;
+  const mine = fixableTaskIds(deps).length;
+  const off = mine === 0;
+  btn.classList.toggle('unavailable', off);
+  if (btn.setAttribute) btn.setAttribute('aria-disabled', off ? 'true' : 'false');
+  btn.title = off
+    ? (total === 0
+        ? '当前没有排期问题'
+        : '这些问题都不归你负责，无法一键调整；请联系任务负责人或项目所属人处理')
+    : ('只处理归你负责的问题' + (mine < total ? `（当前 ${total} 条问题，其中 ${mine} 条的所属任务归你）` : ''));
+}
+
 function locateTask(taskId, on, deps) {
   const el = deps.gantt ? deps.gantt.querySelector(`.bar[data-task-id="${taskId}"]`) : null;
   if (!el) return;
@@ -50,6 +91,8 @@ export function renderProbList(deps) {
   if (!list) return;
   const problems = deps.sched.problems();
   if (countEl) countEl.textContent = problems.length;
+  // 批量按钮的状态每次重绘都重算（问题列表变了，可处理范围随之变化）
+  syncAutoFixAllBtn(deps);
   if (!problems.length) {
     list.innerHTML = '<div class="empty-tip">当前没有排期问题<br>拖拽任务条 / 修改依赖 / 切换手动计划后会自动检测</div>';
     return;
@@ -58,7 +101,7 @@ export function renderProbList(deps) {
     const t = deps.sched.getTask(p.taskId);
     // 处理动作会改这条任务本身 → 按归属判。别人的任务只显示问题描述，
     // 不渲染「自动调整 / 忽略」——渲染了再在事件里 return 会留下一个假的可点区域。
-    const canFix = t ? canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state)) : false;
+    const canFix = canFixProblem(p.taskId, deps);
     return `<div class="prob" data-task="${p.taskId}">
       <div class="prob-top"><span class="ico ${p.type}">${PROB_ICO[p.type] || '!'}</span>
         <span class="prob-name">${t ? deps.sched.nameOf(t) : '未知任务'}</span></div>

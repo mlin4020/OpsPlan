@@ -177,8 +177,11 @@ export function buildShellHTML() {
     <button class="btn" id="btnProblems">排期问题<span class="badge" id="probCount" hidden>0</span></button>
   </div>
   <div class="tgroup sep" data-report-hide>
-    <button class="btn ghost" id="btnUndo" title="撤销（Ctrl+Z）" disabled>↩ 撤销</button>
-    <button class="btn ghost" id="btnRedo" title="重做（Ctrl+Shift+Z 或 Ctrl+Y）" disabled>↪ 重做</button>
+    <!-- 可用性统一走 class（.btn.disabled = 视觉 + pointer-events），不再用 disabled 属性：
+         属性由 updateUndoRedoBtns 按"权限 ∧ 历史栈"重算，用属性会与权限灰化各写各的。
+         初始没有历史 → 直接带 disabled class -->
+    <button class="btn ghost disabled" id="btnUndo" title="撤销（Ctrl+Z）">↩ 撤销</button>
+    <button class="btn ghost disabled" id="btnRedo" title="重做（Ctrl+Shift+Z 或 Ctrl+Y）">↪ 重做</button>
   </div>
   <div class="tgroup" data-report-hide>
     <span class="gl">数据</span>

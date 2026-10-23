@@ -61,6 +61,10 @@ h1{font-size:18px;font-weight:800;letter-spacing:.5px;line-height:1.2}
 .btn:disabled{opacity:.45;cursor:not-allowed}
 .btn:disabled:hover{border-color:#e3e9f1;color:#334155;transform:none;box-shadow:0 1px 1.5px #0f172a0d}
 .btn.disabled{opacity:.45;pointer-events:none}
+/* 「当前不适用」但需要解释原因的按钮：只降透明度，**保留指针事件**。
+   理由：pointer-events:none 的元素浏览器不派发 hover → title 永远弹不出来，
+   置灰就等于把"为什么不能点"一起藏了。点击由业务守卫拦住并 toast 说明。 */
+.btn.unavailable{opacity:.45;cursor:not-allowed}
 .spacer{flex:1}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:9px;background:var(--red);color:#fff;font-size:10px;font-weight:800;margin-left:4px;line-height:1}
 .badge[hidden]{display:none}

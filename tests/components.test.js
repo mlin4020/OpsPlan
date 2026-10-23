@@ -16,6 +16,7 @@ import { bindReqPage } from '../src/components/req-page.js';
 import { openTaskDrawer } from '../src/components/task-drawer.js';
 import { bindModals } from '../src/components/modals.js';
 import { bindResLib } from '../src/components/reslib.js';
+import { bindToolbar } from '../src/components/toolbar.js';
 import {
   READONLY_BTN_IDS, FULL_ONLY_BTN_IDS, refreshUI, leaveReadonly
 } from '../src/utils/readonly.js';
@@ -458,7 +459,11 @@ describe('components: 问题抽屉按归属显隐处理按钮（Task 11）', () 
   const render = res => {
     const els = {};
     const deps = {
-      getEl: id => (els[id] = els[id] || { innerHTML: '', textContent: '', querySelectorAll: () => [], addEventListener() {} }),
+      // classList 是真实按钮的必备接口：renderProbList 会顺手刷新「全部自动调整」的置灰态
+      getEl: id => (els[id] = els[id] || {
+        innerHTML: '', textContent: '', title: '', querySelectorAll: () => [], addEventListener() {},
+        classList: { toggle() {}, add() {}, remove() {}, contains: () => false }
+      }),
       planStore: { state: { modules: [{ name: '甲需求', owner: '李四' }] } },
       gantt: null,
       sched: {
@@ -730,5 +735,290 @@ describe('readonly: leaveReadonly 不得把只读用户翻成 full', () => {
     leaveReadonly(fakeDoc([]));
     expect(userStore.state.access).toBe('full');
     expect(userStore.state.readonly).toBe(false);
+  });
+});
+
+// ============================================================
+// Batch 2 遗留 A1：FULL_ONLY 组只有 class 灰化，点击口没有守卫。
+//   数据层有 {kind:'plan'} 兜住，所以后果不是"数据被改坏"，而是
+//   「按钮看起来能点、点了没反应」—— 用户无从判断是自己没权限还是功能坏了。
+//   这里钉的是**点击分发处**的守卫，与 refreshUI 的灰化同源（permission.isFull）。
+// ============================================================
+describe('readonly: FULL_ONLY 按钮的点击守卫（A1）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  // 工具栏替身：getEl 按 id 现造元素并记录事件；doc 只需 querySelectorAll / addEventListener
+  function fakeToolbar() {
+    const els = {};
+    const docHandlers = {};
+    const mk = id => {
+      if (els[id]) return els[id];
+      const h = {};
+      const set = new Set();
+      const el = {
+        id, _h: h, _clicks: 0,
+        style: {}, value: '', hidden: false, dataset: {},
+        // syncViewBtns 走 deps.getEl('gantt').ownerDocument
+        ownerDocument: doc,
+        classList: {
+          toggle(c, on) { if (on) set.add(c); else set.delete(c); },
+          add(c) { set.add(c); }, remove(c) { set.delete(c); },
+          contains: c => set.has(c), has: c => set.has(c)
+        },
+        addEventListener(t, fn) { (h[t] = h[t] || []).push(fn); },
+        // 只记录"被点了几次"，不在这里派发 click 处理器（避免与 on() 绑定混淆）
+        click() { el._clicks++; },
+        querySelectorAll: () => [],
+        querySelector: () => null,
+        fire(t, ev) { (h[t] || []).forEach(fn => fn(ev)); }
+      };
+      // disabled 属性读写要能计数：A2 要断言"不再用 disabled 属性"
+      let attr = false;
+      Object.defineProperty(el, 'disabled', {
+        get: () => attr,
+        set: v => { el._disabledWrites++; attr = !!v; }
+      });
+      els[id] = el;
+      return el;
+    };
+    const doc = {
+      addEventListener(t, fn) { (docHandlers[t] = docHandlers[t] || []).push(fn); },
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      createElement: id => mk(id || '__created'),
+      getElementById: id => els[id] || null,
+      body: { classList: { toggle() {}, add() {}, remove() {} } },
+      defaultView: { matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }) }
+    };
+    return {
+      els, getEl: mk, doc, docHandlers,
+      fireDoc: (t, ev) => (docHandlers[t] || []).forEach(fn => fn(ev))
+    };
+  }
+
+  const setup = access => {
+    userStore.set(access === 'collab'
+      ? { readonly: false, access: 'collab', resourceName: '张三' }
+      : { readonly: false, access: 'full', role: 'admin' });
+    const f = fakeToolbar();
+    const sched = {
+      computeSchedule: vi.fn(), canUndo: () => true, canRedo: () => true,
+      undo: vi.fn(), redo: vi.fn(), importJSON: vi.fn(),
+      problems: () => [], tasks: () => [], getTask: () => null, nameOf: () => '',
+      fmt: () => '2026-09-01', F: v => v, loadFromServer: () => Promise.resolve(true)
+    };
+    bindToolbar({ ...stubDeps(), doc: f.doc, getEl: f.getEl, sched, toast: vi.fn(), render: () => {} });
+    return { f, sched };
+  };
+
+  it('协作者点「自动计划」：不触发 computeSchedule', () => {
+    const { f, sched } = setup('collab');
+    f.els.btnAutoPlan.fire('click', {});
+    expect(sched.computeSchedule).not.toHaveBeenCalled();
+  });
+
+  it('协作者点「导入」：不打开文件选择', () => {
+    const { f } = setup('collab');
+    f.els.btnImport.fire('click', {});
+    expect(f.els.fileImport._clicks).toBe(0);
+  });
+
+  it('协作者点「撤销 / 重做」：不执行 undo / redo', () => {
+    const { f, sched } = setup('collab');
+    f.els.btnUndo.fire('click', {});
+    f.els.btnRedo.fire('click', {});
+    expect(sched.undo).not.toHaveBeenCalled();
+    expect(sched.redo).not.toHaveBeenCalled();
+  });
+
+  it('协作者按 Ctrl+Z / Ctrl+Y：键盘路径同样收口（绕开按钮不能成为后门）', () => {
+    const { f, sched } = setup('collab');
+    const ev = key => ({
+      key, ctrlKey: true, target: { tagName: 'DIV' },
+      preventDefault() {}, stopPropagation() {}
+    });
+    f.fireDoc('keydown', ev('z'));
+    f.fireDoc('keydown', ev('y'));
+    expect(sched.undo).not.toHaveBeenCalled();
+    expect(sched.redo).not.toHaveBeenCalled();
+  });
+
+  it('全权身份：同样的路径仍然生效（守卫不是一刀切禁用）', () => {
+    const { f, sched } = setup('full');
+    f.els.btnAutoPlan.fire('click', {});
+    f.els.btnImport.fire('click', {});
+    f.els.btnUndo.fire('click', {});
+    f.els.btnRedo.fire('click', {});
+    expect(sched.computeSchedule).toHaveBeenCalledTimes(1);
+    expect(f.els.fileImport._clicks).toBe(1);
+    expect(sched.undo).toHaveBeenCalledTimes(1);
+    expect(sched.redo).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ============================================================
+// Batch 2 遗留 A2：updateUndoRedoBtns 写 disabled 属性，与 class 灰化口径冲突。
+//   结论（实测 jsdom + 真实浏览器口径见报告）：class .btn.disabled 带
+//   pointer-events:none，鼠标点不进去；但 `disabled` 属性本身是另一套状态，
+//   一旦历史栈有内容就被翻成 false —— 语义上"可点"，且与灰化互不感知。
+//   统一口径：可用性也走 class，且**必须与权限相与**，不能把权限灰化重新点亮。
+// ============================================================
+describe('readonly: 撤销/重做的可用性口径（A2）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const mkBtn = () => {
+    const set = new Set();
+    const h = {};
+    const el = {
+      _disabledWrites: 0, _clicks: 0,
+      classList: {
+        toggle(c, on) { if (on) set.add(c); else set.delete(c); },
+        add(c) { set.add(c); }, remove(c) { set.delete(c); },
+        contains: c => set.has(c), has: c => set.has(c)
+      },
+      addEventListener(t, fn) { (h[t] = h[t] || []).push(fn); },
+      click() { el._clicks++; }
+    };
+    let attr = false;
+    Object.defineProperty(el, 'disabled', {
+      get: () => attr,
+      set: v => { el._disabledWrites++; attr = !!v; }
+    });
+    return el;
+  };
+
+  const mkToolbar = canUndo => {
+    const els = { btnUndo: mkBtn(), btnRedo: mkBtn(), fileImport: mkBtn() };
+    const doc = {
+      addEventListener() {}, querySelectorAll: () => [], querySelector: () => null,
+      createElement: () => mkBtn(), getElementById: id => els[id] || null,
+      body: { classList: { toggle() {} } },
+      defaultView: { matchMedia: () => ({ matches: false, addEventListener() {} }) }
+    };
+    // bindToolbar 的 syncViewBtns 走 deps.getEl('gantt').ownerDocument，替身必须给
+    els.gantt = { ownerDocument: doc, querySelectorAll: () => [], addEventListener() {} };
+    const sched = { canUndo: () => canUndo, canRedo: () => canUndo, undo() {}, redo() {}, problems: () => [] };
+    return { els, doc, sched };
+  };
+
+  it('历史栈可用 + 协作者：撤销/重做仍是灰的（不能把权限灰化重新点亮）', () => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+    const { els, doc, sched } = mkToolbar(true);
+    const toolbar = bindToolbar({ ...stubDeps(), doc, getEl: id => els[id] || null, sched, render: () => {}, toast: () => {} });
+    toolbar.updateUndoRedoBtns();
+    expect(els.btnUndo.classList.has('disabled')).toBe(true);
+    expect(els.btnRedo.classList.has('disabled')).toBe(true);
+  });
+
+  it('不再写 disabled 属性：口径只有 class 一套（写过就是冲突）', () => {
+    userStore.set({ readonly: false, access: 'full', role: 'admin' });
+    const { els, doc, sched } = mkToolbar(true);
+    const toolbar = bindToolbar({ ...stubDeps(), doc, getEl: id => els[id] || null, sched, render: () => {}, toast: () => {} });
+    toolbar.updateUndoRedoBtns();
+    expect(els.btnUndo._disabledWrites).toBe(0);
+    expect(els.btnRedo._disabledWrites).toBe(0);
+  });
+
+  it('全权 + 历史栈为空：两个按钮灰；有内容：都不灰（历史栈语义仍生效）', () => {
+    userStore.set({ readonly: false, access: 'full', role: 'admin' });
+    const empty = mkToolbar(false);
+    bindToolbar({ ...stubDeps(), doc: empty.doc, getEl: id => empty.els[id] || null, sched: empty.sched, render: () => {}, toast: () => {} })
+      .updateUndoRedoBtns();
+    expect(empty.els.btnUndo.classList.has('disabled')).toBe(true);
+    expect(empty.els.btnRedo.classList.has('disabled')).toBe(true);
+
+    const full = mkToolbar(true);
+    bindToolbar({ ...stubDeps(), doc: full.doc, getEl: id => full.els[id] || null, sched: full.sched, render: () => {}, toast: () => {} })
+      .updateUndoRedoBtns();
+    expect(full.els.btnUndo.classList.has('disabled')).toBe(false);
+    expect(full.els.btnRedo.classList.has('disabled')).toBe(false);
+  });
+});
+
+// ============================================================
+// Batch 2 遗留 A3：问题抽屉「一键修复全部」未按归属收敛。
+//   Task 11 只收敛了单条「自动调整 / 忽略」，批量那一颗会把别人的任务
+//   一起解锁重排 —— 一次点击改全项目，且事后无法从界面看出改过谁。
+// ============================================================
+describe('components: 「全部自动调整」按归属收敛（A3）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const setup = (problems, tasks, user) => {
+    const els = {};
+    const mk = id => {
+      if (els[id]) return els[id];
+      const h = {};
+      const set = new Set();
+      const el = {
+        id, _h: h, style: {}, value: '', textContent: '', hidden: false, innerHTML: '',
+        dataset: {},
+        classList: {
+          toggle(c, on) { if (on) set.add(c); else set.delete(c); },
+          add(c) { set.add(c); }, remove(c) { set.delete(c); },
+          contains: c => set.has(c), has: c => set.has(c)
+        },
+        addEventListener(t, fn) { (h[t] = h[t] || []).push(fn); },
+        querySelectorAll: () => [],
+        querySelector: () => null,
+        fire(t, ev) { (h[t] || []).forEach(fn => fn(ev)); }
+      };
+      els[id] = el;
+      return el;
+    };
+    const sched = {
+      problems: () => problems,
+      getTask: id => tasks[id] || null,
+      nameOf: () => '某任务',
+      resolveAuto: vi.fn(() => null),
+      resolveIgnore: vi.fn()
+    };
+    const deps = {
+      ...stubDeps(), getEl: mk, sched,
+      planStore: { state: { modules: [{ name: '甲需求', owner: '李四' }] } },
+      render: () => {}, toast: vi.fn()
+    };
+    userStore.set(user || { readonly: false, access: 'collab', resourceName: '张三' });
+    const drawers = bindDrawers(deps);
+    return { els, sched, drawers };
+  };
+
+  const task = (id, res) => ({ id, mod: '甲需求', res, name: id });
+
+  it('只修我有权的：别人的那条不传给 resolveAuto', () => {
+    const problems = [
+      { taskId: 't1', type: 'overlap', desc: 'a' },
+      { taskId: 't2', type: 'overlap', desc: 'b' }
+    ];
+    const tasks = { t1: task('t1', ['张三']), t2: task('t2', ['李四']) };
+    const { els, sched } = setup(problems, tasks);
+    els.btnAutoFixAll.fire('click', {});
+    expect(sched.resolveAuto.mock.calls.map(c => c[0])).toEqual(['t1']);
+  });
+
+  it('一条都不能改：按钮置灰并给出 tooltip，点击不产生任何修改', () => {
+    const problems = [{ taskId: 't2', type: 'overlap', desc: 'b' }];
+    const tasks = { t2: task('t2', ['李四']) };
+    const { els, sched, drawers } = setup(problems, tasks);
+    drawers.renderProbList();
+    // 用 .unavailable 而不是 .disabled：后者带 pointer-events:none，title 弹不出来，
+    // "置灰 + 说明原因"会退化成"只置灰"。
+    expect(els.btnAutoFixAll.classList.has('unavailable')).toBe(true);
+    expect(els.btnAutoFixAll.classList.has('disabled')).toBe(false);
+    expect(els.btnAutoFixAll.title).toMatch(/不归你|无权|负责人/);
+    els.btnAutoFixAll.fire('click', {});
+    expect(sched.resolveAuto).not.toHaveBeenCalled();
+  });
+
+  it('全权身份：全部问题都处理（收敛不是给所有人减功能）', () => {
+    const problems = [
+      { taskId: 't1', type: 'overlap', desc: 'a' },
+      { taskId: 't2', type: 'overlap', desc: 'b' }
+    ];
+    const tasks = { t1: task('t1', ['张三']), t2: task('t2', ['李四']) };
+    const { els, sched, drawers } = setup(problems, tasks, { readonly: false, access: 'full', role: 'admin' });
+    drawers.renderProbList();
+    expect(els.btnAutoFixAll.classList.has('unavailable')).toBe(false);
+    els.btnAutoFixAll.fire('click', {});
+    expect(sched.resolveAuto).toHaveBeenCalledTimes(2);
   });
 });

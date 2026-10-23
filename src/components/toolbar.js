@@ -19,6 +19,23 @@ import { $ } from '../utils/dom.js';
 import { buildExportPayload, buildExportHTML, downloadFile } from '../utils/export.js';
 import { expandAllMods, collapseAllMods } from '../core/mod-fold.js';
 import { scrollDateToCenter } from './gantt-scroll.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, isFull } from '../utils/permission.js';
+
+// FULL_ONLY 组的**点击侧**守卫。
+// 为什么 class 灰化不够：`.btn.disabled{pointer-events:none}` 只挡鼠标，而
+//   · Ctrl+Z / Ctrl+Y 是键盘路径，根本不经过按钮；
+//   · 任何"重新点亮 class"的代码（历史上 updateUndoRedoBtns 就干过类似的事）都会让灰化失效。
+// 判据必须与 utils/readonly.js 的 refreshUI 同源（permission.isFull），不能在这里自己写 if/else，
+// 否则口径分叉时会出现"灰着却能用"或"亮着却点不动"。
+const fullOnlyAllowed = () => isFull(ctxOf(userStore.state));
+
+// 在 FULL_ONLY 动作前统一调用：返回 false 表示当前身份无权，调用方直接 return
+function guardFullOnly(deps) {
+  if (fullOnlyAllowed()) return true;
+  if (deps && deps.toast) deps.toast('该操作会改动整份排期，仅项目所属人或管理员可用');
+  return false;
+}
 
 const ZOOM_DAYW = { day: 13, week: 15, month: 32 };
 const MIN_DAYW = 2, MAX_DAYW = 40;
@@ -242,21 +259,26 @@ function bindToolbarControls(deps) {
     deps.render();
   });
 
-  // 自动计划
+  // 自动计划（FULL_ONLY：全量重排所有自动任务，会动到别人负责的任务）
   on('btnAutoPlan', () => {
+    if (!guardFullOnly(deps)) return;
     deps.sched.computeSchedule();
     deps.render();
     const n = deps.sched.problems().length;
     deps.toast(n ? `已按依赖+资源自动重排，仍有 ${n} 项问题待处理` : '已按依赖+资源自动重排，无排期问题');
   });
-  // 导出 JSON
+  // 导出 JSON（只读也能用：不改数据，只是把当前排期存下来）
   on('btnExport', () => exportJSON(deps));
   // 导出完整 HTML
   on('btnExportHTML', () => exportHTML(deps));
-  // 导入 JSON
-  on('btnImport', () => { const f = g('fileImport'); if (f) f.click(); });
+  // 导入 JSON（FULL_ONLY：整份替换 modules + resources + versions）
+  on('btnImport', () => {
+    if (!guardFullOnly(deps)) return;
+    const f = g('fileImport'); if (f) f.click();
+  });
   const fileImport = g('fileImport');
   if (fileImport) fileImport.addEventListener('change', e => {
+    if (!guardFullOnly(deps)) return;      // 文件选择框若被程序直接触发，也不放行
     const f = e.target.files[0];
     if (!f) return;
     const reader = new FileReader();
@@ -282,23 +304,9 @@ function bindToolbarControls(deps) {
     });
   });
 
-  // 撤销 / 重做按钮
-  on('btnUndo', () => {
-    if (deps.sched.canUndo()) {
-      deps.sched.undo();
-      deps.render();
-      updateUndoRedoBtns(deps);
-      deps.toast('已撤销');
-    }
-  });
-  on('btnRedo', () => {
-    if (deps.sched.canRedo()) {
-      deps.sched.redo();
-      deps.render();
-      updateUndoRedoBtns(deps);
-      deps.toast('已重做');
-    }
-  });
+  // 撤销 / 重做（FULL_ONLY：回滚整份 plan 快照，会连带回滚别人的改动）
+  on('btnUndo', () => { doUndo(deps); });
+  on('btnRedo', () => { doRedo(deps); });
 
   // 全局键盘快捷键：Ctrl+Z 撤销，Ctrl+Shift+Z / Ctrl+Y 重做；Esc 关闭移动端「更多」弹层
   doc.addEventListener('keydown', e => {
@@ -312,30 +320,41 @@ function bindToolbarControls(deps) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
     if (e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
-      if (deps.sched.canUndo()) {
-        deps.sched.undo();
-        deps.render();
-        updateUndoRedoBtns(deps);
-        deps.toast('已撤销');
-      }
+      doUndo(deps);            // 键盘走同一个入口：不能成为绕过按钮灰化的后门
     } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
       e.preventDefault();
-      if (deps.sched.canRedo()) {
-        deps.sched.redo();
-        deps.render();
-        updateUndoRedoBtns(deps);
-        deps.toast('已重做');
-      }
+      doRedo(deps);
     }
   });
 }
 
-// 更新撤销/重做按钮的 disabled 状态
+// 撤销/重做的唯一执行口（按钮与快捷键共用）
+function doUndo(deps) {
+  if (!guardFullOnly(deps) || !deps.sched.canUndo()) return;
+  deps.sched.undo();
+  deps.render();
+  updateUndoRedoBtns(deps);
+  deps.toast('已撤销');
+}
+function doRedo(deps) {
+  if (!guardFullOnly(deps) || !deps.sched.canRedo()) return;
+  deps.sched.redo();
+  deps.render();
+  updateUndoRedoBtns(deps);
+  deps.toast('已重做');
+}
+
+// 更新撤销/重做按钮的可用性。
+// 口径统一为 class（`.btn.disabled` 同时负责视觉与 pointer-events），**不再写 disabled 属性**：
+//   属性与 class 是两套状态，各写各的必然打架 —— 历史栈一有内容就把权限灰化翻成"可点"，
+//   反之灰着却带 disabled=false 也会让后续读数的人误判。
+// 判据是"权限 ∧ 历史栈"：协作者即使有可撤销的快照，按钮也必须保持灰。
 function updateUndoRedoBtns(deps) {
+  const allowed = fullOnlyAllowed();
   const undoBtn = deps.getEl('btnUndo');
   const redoBtn = deps.getEl('btnRedo');
-  if (undoBtn) undoBtn.disabled = !deps.sched.canUndo();
-  if (redoBtn) redoBtn.disabled = !deps.sched.canRedo();
+  if (undoBtn) undoBtn.classList.toggle('disabled', !(allowed && deps.sched.canUndo()));
+  if (redoBtn) redoBtn.classList.toggle('disabled', !(allowed && deps.sched.canRedo()));
 }
 
 // 聚合入口：绑定工具栏全部事件，返回外部可用的工具栏 API
