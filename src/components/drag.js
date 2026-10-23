@@ -12,9 +12,19 @@
 //   render   - 重绘回调
 //   doc      - Document（缺省 document），用于全局事件注册与 cursor/userSelect
 //   win      - Window（缺省 doc.defaultView），用于 mousemove/mouseup 全局监听
-//   isReadonly - () => boolean，只读时不启动拖拽（复用 readonly.js）
+// 起拖守卫已从"全局只读"改为"这条任务归不归我"（permission.js 的 canEditTask / canTouchTask）：
+//   协作者可以拖自己的任务，但拖不动别人的；里程碑按需求归属判。只读身份两者都不放行。
 // ============================================================
 import { notifyPinned } from '../utils/pinned.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canEditTask, canTouchTask } from '../utils/permission.js';
+
+// 需求名 → 需求对象：里程碑没有 res，编辑权要按**需求归属**判（不能用任务判据——
+// 那会把"没有 res"误当成"未分配可认领"而放行）。
+function modOf(name, deps) {
+  const mods = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || [];
+  return mods.find(m => m.name === name) || null;
+}
 
 let barDrag = null;    // 任务条整体拖动
 let barResize = null;  // 边缘调整工作量
@@ -216,9 +226,10 @@ function onMouseUp(deps) {
 // 任务条 mousedown：边缘 → 调整工作量；主体 → 整体拖动（只读不响应）
 export function startBarDrag(e, taskId, deps) {
   if (e.button !== 0) return;
-  if (deps.isReadonly && deps.isReadonly()) return;
   const t = deps.sched.getTask(taskId);
   if (!t || t.isMs) return;
+  // 归属口径（不是"全局只读"）：只有我能动的任务才响应拖拽
+  if (!canEditTask(t, ctxOf(userStore.state))) return;
   e.stopPropagation();
   e.preventDefault();
   const rEl = e.target.closest('.bar-resize');
@@ -237,7 +248,8 @@ export function startBarDrag(e, taskId, deps) {
 }
 
 function startBarResize(e, taskId, edge, t, deps) {
-  if (deps.isReadonly && deps.isReadonly()) return;
+  // 起拖时已按归属放行，这里再判一次：resize 是独立入口（手柄自己的 mousedown 也走这条）
+  if (!canEditTask(t, ctxOf(userStore.state))) return;
   barResize = {
     taskId, edge,
     anchorDate: asDate(deps, edge === 'l' ? t.s : t.e),
@@ -250,9 +262,10 @@ function startBarResize(e, taskId, edge, t, deps) {
 // 里程碑 mousedown（只读不响应）
 export function startMsDrag(e, taskId, deps) {
   if (e.button !== 0) return;
-  if (deps.isReadonly && deps.isReadonly()) return;
   const t = deps.sched.getTask(taskId);
   if (!t || !t.isMs) return;
+  // 里程碑按需求归属判定（它没有 res，按任务判据会被当成"未分配"放行）
+  if (!canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state))) return;
   e.stopPropagation();
   e.preventDefault();
   msDrag = {

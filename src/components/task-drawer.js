@@ -21,12 +21,15 @@ import { isOverdueTask } from '../core/task-status.js';
 import { closeDrawer, getPanel, onDrawerClose, setPanel } from './drawer-shell.js';
 import { openProblemDrawer, renderProbList, updateProblemBadge } from './problem-drawer.js';
 import { mergePinned, notifyPinned } from '../utils/pinned.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canTouchTask } from '../utils/permission.js';
 
 let draftIsMs = false;          // 当前抽屉选择的类型：true=里程碑
 let modalDeps = [];             // 依赖草稿 [{id, lag}]
 let newTaskMode = null;         // 新建任务模式：{ mod, start } 或 null（编辑模式；start=右击位置对应日期）
 let draftPhase = 'dev';         // 新建模式下的阶段草稿
 let depMod = null;              // 依赖级联：当前选中的需求名（null=未选，渲染时默认取第一个有可用任务的需求）
+let draftEditable = true;       // 当前抽屉里的任务是否归我（新建模式下 = 全局可写）
 
 // 便捷存取共享状态（未注入 shared 时降级为模块内变量）
 const curTaskId = deps => (deps.shared ? deps.shared.activeTaskId : null);
@@ -38,6 +41,31 @@ const setModalRes = (deps, v) => { if (deps.shared) deps.shared.modalRes = v; el
 // 只读守卫（组件层统一）：true=可编辑，false=只读
 function editable(deps) {
   return !(deps.isReadonly && deps.isReadonly());
+}
+
+// 需求名 → 需求对象（里程碑的编辑权按需求归属判，不按任务的 res）
+function modOf(name, deps) {
+  const mods = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || [];
+  return mods.find(m => m.name === name) || null;
+}
+
+// 这条任务归不归我：普通任务看 res（未分配可认领），里程碑看需求归属
+function canTouch(t, deps) {
+  if (!t) return false;
+  return canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state));
+}
+
+// 表单字段可写性：保存/删除按钮 + 输入控件。
+// 只读语义仍是"能不能写"，这里只是把判据从"全局只读"换成"这条任务归不归我"。
+const EDIT_FIELD_IDS = ['inpName', 'inpStart', 'inpEnd', 'inpW'];
+function applyEditability(on, deps) {
+  const g = deps.getEl;
+  EDIT_FIELD_IDS.forEach(id => { const el = g(id); if (el) el.readOnly = !on; });
+  // range 控件没有 readOnly 效果，必须 disabled 才能真正拦住拖动
+  ['inpProgress', 'btnQuickComplete', 'btnSaveTask', 'btnDeleteTask'].forEach(id => {
+    const el = g(id);
+    if (el) el.disabled = !on;
+  });
 }
 
 // ============ 表单填充 ============
@@ -93,7 +121,8 @@ function fillTaskForm(t, deps) {
   const probs = deps.sched.problems().filter(p => p.taskId === t.id);
   const isOverdue = isOverdueTask(t, deps.today());
   const fIssue = g('fIssue');
-  const ro = deps.isReadonly();
+  // 问题条上的「自动调整 / 忽略」改的是这条任务本身 → 按归属判（别人的任务只显示问题）
+  const ro = !draftEditable;
   const taskId = t.id;
 
   if (probs.length || isOverdue) {
@@ -157,8 +186,8 @@ function renderModPhaseSelects(deps, preset) {
   if (pre && [...modSel.options].some(o => o.value === pre)) modSel.value = pre;
   const prePhase = (preset && preset.phase) || draftPhase;
   phSel.value = Object.keys(deps.PNAME).includes(prePhase) ? prePhase : (deps.PNAME.dev ? 'dev' : phSel.value);
-  // 只读：下拉禁用（保存本身由 saveTask 守卫，此处仅避免误导可改）
-  const ro = !editable(deps);
+  // 不可编辑（只读 / 别人的任务）：下拉禁用（保存本身由 saveTask 守卫，此处仅避免误导可改）
+  const ro = !draftEditable;
   modSel.disabled = ro;
   phSel.disabled = ro;
 }
@@ -202,10 +231,13 @@ export function openTaskDrawer(taskId, deps) {
   const row = deps.getEl('rowModPhase'); if (row) row.hidden = false;
   setTaskId(deps, taskId);
   draftIsMs = !!t.m;
+  // 先定"这条任务归不归我"再填表单：表单与按钮的可用性全部读 draftEditable
+  draftEditable = canTouch(t, deps);
   renderSegType(draftIsMs, deps);
   applyMilestoneView(draftIsMs, deps);
   renderModPhaseSelects(deps, { mod: t.mod, phase: t.p });
   if (draftIsMs) fillMsForm(t, deps); else fillTaskForm(t, deps);
+  applyEditability(draftEditable, deps);
   const del = deps.getEl('btnDeleteTask'); if (del) del.style.display = '';
   setPanel('task');
   const d = deps.getEl('taskDrawer'), m = deps.getEl('drawerMask');
@@ -221,10 +253,13 @@ export function openNewTaskDrawer(opts, deps) {
   const row = deps.getEl('rowModPhase'); if (row) row.hidden = false;
   setTaskId(deps, null);
   draftIsMs = false;
+  // 新建模式没有"归属"可判（任务还不存在）：沿用全局可写口径（addTask 的守卫按打算派给谁判）
+  draftEditable = editable(deps);
   renderSegType(false, deps);
   applyMilestoneView(false, deps);
   renderModPhaseSelects(deps);
   fillNewTaskForm(deps);
+  applyEditability(draftEditable, deps);
   const del = deps.getEl('btnDeleteTask'); if (del) del.style.display = 'none';
   setPanel('task');
   const d = deps.getEl('taskDrawer'), m = deps.getEl('drawerMask');

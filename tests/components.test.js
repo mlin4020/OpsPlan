@@ -1,6 +1,6 @@
 // 组件层测试：锁定拖拽翻转限制、只读守卫、exportHTML 回退逻辑
 //   另含 2026-09-21 拆分后的结构契约（drawers.js 曾 1112 行，现按职责拆为 5 个模块）
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,10 @@ import { defaultModules, defaultResources } from '../src/core/default-data.js';
 import { createWorkday } from '../src/core/workday.js';
 import { createScheduler } from '../src/scheduler/index.js';
 import { bindDrawers, paintModHover, pickDragHandle } from '../src/components/drawers.js';
-import { isPanTarget } from '../src/components/drag.js';
+import { isPanTarget, startBarDrag, startMsDrag } from '../src/components/drag.js';
+import { renderProbList } from '../src/components/problem-drawer.js';
 import { bindReqPage } from '../src/components/req-page.js';
+import { openTaskDrawer } from '../src/components/task-drawer.js';
 import {
   READONLY_BTN_IDS, FULL_ONLY_BTN_IDS, refreshUI, leaveReadonly
 } from '../src/utils/readonly.js';
@@ -302,6 +304,180 @@ describe('req-page: 台账事件委托', () => {
     bindReqPage(deps);
     expect(deps.viewState.reqFilter.scope).toBe('all');
     expect(deps.viewState.reqSort.key).toBe('group');   // 默认「进行中优先」，不再按甘特图顺序
+  });
+});
+
+// ============================================================
+// 任务抽屉：他人任务只读（Task 11）
+//   抽屉是"一条任务的编辑闭环"，可用性必须按**这条任务归不归我**判，
+//   而不是按"全局只读"——协作者要能编辑自己的任务，但打开别人的只能是看。
+// ============================================================
+function fakeDrawerDeps() {
+  const els = {};
+  const mk = () => ({
+    style: {}, value: '', textContent: '', hidden: false, innerHTML: '',
+    readOnly: false, disabled: false, options: [],
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener() {}, querySelectorAll: () => [], querySelector: () => null
+  });
+  return {
+    els,
+    getEl: id => (els[id] = els[id] || mk()),
+    doc: {},
+    planStore: { state: { modules: [{ name: '甲需求', owner: '李四' }], resources: [] } },
+    sched: {
+      getTask: () => null, nameOf: () => '某任务', problems: () => [], tasks: () => [],
+      fmt: () => '2026-09-01', F: v => v
+    },
+    isReadonly: () => false,
+    workday: { spanDays: () => 1, workDays: () => 1 },
+    today: () => new Date(2026, 8, 1),
+    PNAME: { dev: '开发' },
+    shared: { activeTaskId: null, modalRes: [] },
+    toast: () => {},
+    render: () => {},
+    reslib: {}, modals: {}
+  };
+}
+
+describe('components: 任务抽屉按归属只读（Task 11）', () => {
+  const task = (res) => ({
+    id: 't1', mod: '甲需求', p: 'dev', name: '某任务', s: '2026-09-01', e: '2026-09-02',
+    w: 1, done: 0, res, dep: [], manual: true
+  });
+
+  const open = t => {
+    const deps = fakeDrawerDeps();
+    deps.sched.getTask = id => (id === t.id ? t : null);
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    openTaskDrawer(t.id, deps);
+    return deps;
+  };
+
+  it('打开别人的任务：保存/删除按钮禁用，表单字段只读', () => {
+    const deps = open(task(['李四']));
+    expect(deps.els.btnSaveTask.disabled).toBe(true);
+    expect(deps.els.btnDeleteTask.disabled).toBe(true);
+    expect(deps.els.inpName.readOnly).toBe(true);
+    expect(deps.els.inpW.readOnly).toBe(true);
+    expect(deps.els.inpProgress.disabled).toBe(true);   // range 没有 readOnly 效果
+    expect(deps.els.inpMod.disabled).toBe(true);
+  });
+
+  it('打开自己的任务：可保存可删除，字段可写', () => {
+    const deps = open(task(['张三']));
+    expect(deps.els.btnSaveTask.disabled).toBe(false);
+    expect(deps.els.btnDeleteTask.disabled).toBe(false);
+    expect(deps.els.inpName.readOnly).toBe(false);
+    expect(deps.els.inpProgress.disabled).toBe(false);
+    expect(deps.els.inpMod.disabled).toBe(false);
+  });
+
+  it('未分配任务（res:[]）：协作者可认领 → 抽屉可编辑', () => {
+    const deps = open(task([]));
+    expect(deps.els.btnSaveTask.disabled).toBe(false);
+  });
+
+  it('只读身份打开自己的任务：仍然只读（归属之外还有身份这一层）', () => {
+    const t = task(['张三']);
+    const deps = fakeDrawerDeps();
+    deps.sched.getTask = id => (id === t.id ? t : null);
+    userStore.set({ readonly: true, access: 'readonly', resourceName: '张三' });
+    openTaskDrawer(t.id, deps);
+    expect(deps.els.btnSaveTask.disabled).toBe(true);
+    expect(deps.els.inpName.readOnly).toBe(true);
+  });
+});
+
+// ============================================================
+// 拖拽起手 & 问题抽屉：按归属收敛（Task 11）
+//   拖拽的 observable 是"有没有接管这次 mousedown"（stopPropagation/preventDefault）：
+//   守卫命中时直接 return，不接管 —— 于是事件继续冒泡到空白处平移，与"点不动"一致。
+// ============================================================
+describe('components: 拖拽起手按归属收敛（Task 11）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const deps = (task, mods) => ({
+    planStore: { state: { modules: mods || [{ name: '甲需求', owner: '李四' }] } },
+    sched: { getTask: id => (id === task.id ? task : null), F: v => new Date(v) },
+    workday: { spanDays: () => 2 }, getCtx: () => ({}), render: () => {}
+  });
+  const mouseDown = () => ({
+    button: 0,
+    clientX: 100,
+    target: { closest: () => null },
+    currentTarget: { classList: { contains: () => false } },
+    stopPropagation: vi.fn(),
+    preventDefault: vi.fn()
+  });
+
+  const task = res => ({
+    id: 't1', mod: '甲需求', p: 'dev', s: '2026-09-01', e: '2026-09-02', res, dep: [], manual: true
+  });
+
+  it('协作者拖自己的任务：接管 mousedown；拖别人的：不接管', () => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+
+    const mine = mouseDown();
+    startBarDrag(mine, 't1', deps(task(['张三'])));
+    expect(mine.stopPropagation).toHaveBeenCalled();
+
+    const others = mouseDown();
+    startBarDrag(others, 't1', deps(task(['李四'])));
+    expect(others.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('里程碑按需求归属：需求归我则接管，归别人则不接管', () => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+    // isMs 是 collect() 写回的标记（渲染层拿到的就是这种形态）
+    const ms = { id: 'ms-1', mod: '甲需求', m: '2026-09-09', label: '上线', isMs: true };
+
+    const mine = mouseDown();
+    startMsDrag(mine, 'ms-1', deps(ms, [{ name: '甲需求', owner: '张三' }]));
+    expect(mine.stopPropagation).toHaveBeenCalled();
+
+    // 里程碑没有 res：若按任务判据会被当成"未分配可认领"而误放行
+    const others = mouseDown();
+    startMsDrag(others, 'ms-1', deps(ms, [{ name: '甲需求', owner: '李四' }]));
+    expect(others.stopPropagation).not.toHaveBeenCalled();
+  });
+
+  it('只读身份：自己的任务也不接管', () => {
+    userStore.set({ readonly: true, access: 'readonly', resourceName: '张三' });
+    const e = mouseDown();
+    startBarDrag(e, 't1', deps(task(['张三'])));
+    expect(e.stopPropagation).not.toHaveBeenCalled();
+  });
+});
+
+describe('components: 问题抽屉按归属显隐处理按钮（Task 11）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const render = res => {
+    const els = {};
+    const deps = {
+      getEl: id => (els[id] = els[id] || { innerHTML: '', textContent: '', querySelectorAll: () => [], addEventListener() {} }),
+      planStore: { state: { modules: [{ name: '甲需求', owner: '李四' }] } },
+      gantt: null,
+      sched: {
+        problems: () => [{ taskId: 't1', type: 'overlap', desc: '任务重叠' }],
+        getTask: () => ({ id: 't1', mod: '甲需求', res, name: '某任务' }),
+        nameOf: () => '某任务',
+        resolveAuto: () => null, resolveIgnore: () => {}
+      },
+      render: () => {}, toast: () => {}
+    };
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+    renderProbList(deps);
+    return els.probList.innerHTML;
+  };
+
+  it('自己的任务：渲染「自动调整 / 忽略」；别人的任务：只显示问题描述', () => {
+    expect(render(['张三'])).toContain('data-act="auto"');
+    const other = render(['李四']);
+    expect(other).toContain('任务重叠');           // 问题本身仍然显示
+    expect(other).not.toContain('data-act="auto"');
+    expect(other).not.toContain('data-act="ignore"');
   });
 });
 

@@ -14,11 +14,27 @@ import { openNewTaskDrawer, openTaskDrawer } from './task-drawer.js';
 import { notifyPinned } from '../utils/pinned.js';
 import { isModCollapsed, toggleModCollapsed } from '../core/mod-fold.js';
 import { scrollToModStart } from './gantt-scroll.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canEditTask, canTouchTask, canManageModule } from '../utils/permission.js';
 
-// 只读守卫（组件层统一）：true=可编辑，false=只读
+// 会话级可写（只读身份 = false）。用于"新增"这类没有既有归属可判的动作
 function editable(deps) {
   return !(deps.isReadonly && deps.isReadonly());
 }
+
+// 需求名 → 需求对象（里程碑按需求归属判）
+function modOf(name, deps) {
+  const mods = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || [];
+  return mods.find(m => m.name === name) || null;
+}
+
+// 这条任务归不归我 —— 菜单项该不该灰、动作该不该执行，都以它为准
+function canTouch(t, deps) {
+  if (!t) return false;
+  return canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state));
+}
+
+const canManage = (mo) => canManageModule(mo, ctxOf(userStore.state));
 
 function openAddModModal(deps) {
   if (deps.modals && deps.modals.openNewModModal) deps.modals.openNewModModal();
@@ -45,6 +61,9 @@ function dateFromEvent(e, deps) {
 function dispatchTaskMenu(key, taskId, deps, atDate) {
   const t = deps.sched.getTask(taskId);
   if (!t) return;
+  // 第二道防线：菜单项已按归属置灰（点击到不了这里），但 dispatch 是公开路径，
+  // 不能只靠"按钮灰了"来保证不写别人的任务
+  if (['complete', 'toggleManual', 'delete'].includes(key) && !canTouch(t, deps)) return;
   if (key === 'addTask') {
     openNewTaskDrawer({ mod: t.mod, start: atDate }, deps);
   } else if (key === 'addModule') {
@@ -75,6 +94,8 @@ function dispatchTaskMenu(key, taskId, deps, atDate) {
 
 // 需求泳道菜单动作：addTask(本需求)/addModule/editMod/toggleCollapse/deleteMod/archiveMod
 function dispatchModMenu(key, modName, deps, atDate) {
+  // 归档/删除需求是归属级动作（会连带动需求里的所有任务），与菜单置灰同口径
+  if ((key === 'archiveMod' || key === 'deleteMod') && !canManage(modOf(modName, deps))) return;
   if (key === 'addTask') {
     openNewTaskDrawer({ mod: modName, start: atDate }, deps);
   } else if (key === 'addModule') {
@@ -119,7 +140,8 @@ export function openTaskContextMenu(e, taskId, deps) {
   const t = deps.sched.getTask(taskId);
   if (!t) return;
   const at = dateFromEvent(e, deps);   // 右击位置对应日期（新建任务即从这天开始）
-  const items = buildTaskMenuItems(t, { editable: editable(deps), atDate: at });
+  // 编辑/完成/切换计划/删除 都改这条任务本身 → 按归属置灰（里程碑按需求归属，由 canTouch 分流）
+  const items = buildTaskMenuItems(t, { editable: canTouch(t, deps), atDate: at });
   openContextMenu({
     x: e.clientX, y: e.clientY, items, doc: deps.doc,
     onPick: key => dispatchTaskMenu(key, taskId, deps, at)
@@ -132,7 +154,10 @@ export function openModContextMenu(e, modName, deps) {
   if (!mo) return;
   const at = dateFromEvent(e, deps);
   const items = buildModuleMenuItems(mo, {
+    // 新增任务/新建需求只需"会话可写"（协作者也能往别人的需求里加任务）；
+    // 归档/删除需求是归属级动作 —— manage 单独判，不能用同一个 editable
     editable: editable(deps),
+    manage: canManage(mo),
     collapsed: isModCollapsed(deps.viewState.collapsed, modName),
     atDate: at
   });

@@ -46,7 +46,7 @@ export function dateAtClientX({ clientX, trackLeft, ctx }) {
 
 // ---- 纯函数：菜单项构建 ----
 // 返回项描述数组：{ key, label, icon?, danger?, disabled?, divider? }
-// flags: { editable, collapsed, atDate } —— 只读时禁用变更类项；collapsed 决定需求折叠文案；
+// flags: { editable, manage, collapsed, atDate } —— editable 控制变更类项；manage 单独控需求归档/删除；collapsed 决定需求折叠文案；
 //   atDate（Date|'YYYY-MM-DD'）为右击位置对应日期，存在时「新增任务」带日期后缀（如「新增任务（3/16 起）」）
 const addTaskLabel = flags => flags.atDate
   ? `新增任务（${fmtD(asDate(flags.atDate))} 起）`
@@ -80,8 +80,12 @@ export function buildResMenuItems(flags = {}) {
 }
 
 // 需求泳道菜单：新增任务(本需求)/新建需求 / 编辑需求 / 折叠(展开) / 归档需求 / 删除需求
+// flags.manage：需求归属级动作（归档/删除）的可用性。缺省跟随 editable，
+//   但两者必须能分开传 —— 协作者往别人的需求里加任务是允许的，
+//   归档/删除那个需求则不行（会连带动别人需求里的所有任务）。
 export function buildModuleMenuItems(mo, flags = {}) {
   const editable = flags.editable !== false;
+  const manage = flags.manage === undefined ? editable : flags.manage !== false;
   const collapsed = !!flags.collapsed;
   return [
     { key: 'addTask', label: addTaskLabel(flags), icon: '＋', disabled: !editable },
@@ -89,9 +93,9 @@ export function buildModuleMenuItems(mo, flags = {}) {
     { divider: true },
     { key: 'editMod', label: '编辑需求', icon: '⚙' },
     { key: 'toggleCollapse', label: collapsed ? '展开需求' : '折叠需求', icon: collapsed ? '▼' : '▲' },
-    { key: 'archiveMod', label: '归档需求', icon: '🗄', disabled: !editable },
+    { key: 'archiveMod', label: '归档需求', icon: '🗄', disabled: !manage },
     { divider: true },
-    { key: 'deleteMod', label: '删除需求', icon: '✕', danger: true, disabled: !editable }
+    { key: 'deleteMod', label: '删除需求', icon: '✕', danger: true, disabled: !manage }
   ];
 }
 

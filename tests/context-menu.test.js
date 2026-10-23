@@ -3,6 +3,8 @@ import { describe, it, expect } from 'vitest';
 import {
   buildTaskMenuItems, buildModuleMenuItems, buildResMenuItems, dateAtClientX
 } from '../src/components/context-menu.js';
+import { openTaskContextMenu, openModContextMenu } from '../src/components/menu-actions.js';
+import { userStore } from '../src/store/user-store.js';
 import { F, fmt } from '../src/core/dates.js';
 
 const keysOf = items => items.filter(i => !i.divider).map(i => i.key);
@@ -146,6 +148,132 @@ describe('context-menu: 菜单项「新增任务」带右击位置日期', () =>
     expect(find(buildTaskMenuItems(task, { atDate: d, editable: false }), 'addTask').disabled).toBe(true);
     expect(keysOf(buildTaskMenuItems(task, { atDate: d })))
       .toEqual(['addTask', 'addModule', 'edit', 'complete', 'toggleManual', 'delete']);
+  });
+});
+
+// ============================================================
+// Task 11：右键菜单的置灰口径从"全局只读"改成"这条数据归不归我"
+//
+// 这组用例走真实装配路径（openTaskContextMenu / openModContextMenu → openContextMenu），
+// 而不是只断言 buildXxxMenuItems 收到的 flags —— 后者会把"调用方传错 flags"的回归放过去。
+// DOM 用最小替身记录生成的 .ctx-menu 子节点，不引入 jsdom。
+// ============================================================
+function fakeEl(tag) {
+  const children = [];
+  return {
+    tagName: tag, className: '', style: {}, innerHTML: '', dataset: {}, children,
+    appendChild(c) { children.push(c); return c; },
+    remove() {},
+    addEventListener() {},
+    getBoundingClientRect: () => ({ width: 120, height: 80, left: 0, top: 0, bottom: 80, right: 120 }),
+    contains: () => false,
+    querySelector: () => null,
+    classList: {
+      _s: new Set(),
+      add(c) { this._s.add(c); },
+      toggle(c, on) { if (on) this._s.add(c); else this._s.delete(c); },
+      contains(c) { return this._s.has(c); }
+    }
+  };
+}
+function fakeMenuDoc() {
+  const doc = {
+    _menu: null,
+    createElement: tag => fakeEl(tag),
+    body: { appendChild: el => { doc._menu = el; } },
+    defaultView: { innerWidth: 1024, innerHeight: 768 },
+    addEventListener() {}, removeEventListener() {},
+    querySelector: () => null
+  };
+  return doc;
+}
+// 菜单项快照：[{ label, disabled }]
+function menuOf(doc) {
+  return ((doc._menu && doc._menu.children) || []).map(b => ({
+    label: String(b.innerHTML).replace(/^.*ctx-label">/, '').replace(/<\/span>$/, ''),
+    disabled: b.className.includes('disabled')
+  }));
+}
+const item = (list, label) => list.find(i => i.label.includes(label));
+
+function menuDeps(doc) {
+  return {
+    doc,
+    viewState: { collapsed: {} },
+    planStore: { state: { modules: [] } },
+    sched: { getTask: () => null },
+    render: () => {},
+    toast: () => {},
+    getEl: () => null
+  };
+}
+
+describe('context-menu: 协作者按归属置灰（Task 11）', () => {
+  const own = { id: 't-own', mod: '甲需求', done: 0, res: ['张三'], manual: true };
+  const other = { id: 't-other', mod: '甲需求', done: 0, res: ['李四'], manual: true };
+
+  const openTask = task => {
+    const doc = fakeMenuDoc();
+    const deps = menuDeps(doc);
+    deps.planStore.state.modules = [{ name: '甲需求', owner: '李四' }];
+    deps.sched.getTask = id => (id === task.id ? task : null);
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    openTaskContextMenu({ clientX: 10, clientY: 10 }, task.id, deps);
+    return menuOf(doc);
+  };
+
+  it('自己的任务：完成 / 切换计划 / 删除都可用', () => {
+    const items = openTask(own);
+    expect(item(items, '标记完成').disabled).toBe(false);
+    expect(item(items, '切换为自动').disabled).toBe(false);
+    expect(item(items, '删除任务').disabled).toBe(false);
+  });
+
+  it('别人的任务：完成 / 切换计划 / 删除全部置灰', () => {
+    const items = openTask(other);
+    expect(item(items, '标记完成').disabled).toBe(true);
+    expect(item(items, '切换为自动').disabled).toBe(true);
+    expect(item(items, '删除任务').disabled).toBe(true);
+  });
+
+  // 里程碑没有 res：若按任务判据会被当成"未分配可认领"而放行 —— 这条专门钉住那个错配
+  it('里程碑按需求归属判：需求归我则可用，归别人则置灰', () => {
+    const msMine = { id: 'ms-1', mod: '乙需求', m: '2026-09-09', label: '上线' };
+    const msOther = { id: 'ms-2', mod: '丙需求', m: '2026-09-10', label: '上线' };
+    const openMs = (ms, owner) => {
+      const doc = fakeMenuDoc();
+      const deps = menuDeps(doc);
+      deps.planStore.state.modules = [
+        { name: '乙需求', owner }, { name: '丙需求', owner }
+      ];
+      deps.sched.getTask = id => (id === ms.id ? ms : null);
+      userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+      openTaskContextMenu({ clientX: 10, clientY: 10 }, ms.id, deps);
+      return menuOf(doc);
+    };
+    expect(item(openMs(msMine, '张三'), '删除任务').disabled).toBe(false);
+    expect(item(openMs(msOther, '李四'), '删除任务').disabled).toBe(true);
+  });
+
+  it('需求泳道：归档/删除按归属置灰，但「新增任务」对协作者仍可用', () => {
+    const openMod = owner => {
+      const doc = fakeMenuDoc();
+      const deps = menuDeps(doc);
+      deps.planStore.state.modules = [{ name: '甲需求', owner }];
+      userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+      openModContextMenu({ clientX: 10, clientY: 10 }, '甲需求', deps);
+      return menuOf(doc);
+    };
+    const mine = openMod('张三');
+    expect(item(mine, '归档需求').disabled).toBe(false);
+    expect(item(mine, '删除需求').disabled).toBe(false);
+    expect(item(mine, '新增任务').disabled).toBe(false);
+
+    const others = openMod('李四');
+    expect(item(others, '归档需求').disabled).toBe(true);
+    expect(item(others, '删除需求').disabled).toBe(true);
+    // 往别人的需求里加任务是允许的（新增只看会话可写）
+    expect(item(others, '新增任务').disabled).toBe(false);
   });
 });
 

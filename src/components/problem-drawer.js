@@ -11,8 +11,16 @@
 // ============================================================
 import { setPanel } from './drawer-shell.js';
 import { notifyPinned } from '../utils/pinned.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canTouchTask } from '../utils/permission.js';
 
 const PROB_ICO = { overlap: '!', depend: '↗', overdue: '⌛', cycle: '∞' };
+
+// 需求名 → 需求对象（里程碑的编辑权按需求归属判）
+function modOf(name, deps) {
+  const mods = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || [];
+  return mods.find(m => m.name === name) || null;
+}
 
 export function updateProblemBadge(deps) {
   const n = deps.sched.problems().length;
@@ -48,14 +56,17 @@ export function renderProbList(deps) {
   }
   list.innerHTML = problems.map(p => {
     const t = deps.sched.getTask(p.taskId);
+    // 处理动作会改这条任务本身 → 按归属判。别人的任务只显示问题描述，
+    // 不渲染「自动调整 / 忽略」——渲染了再在事件里 return 会留下一个假的可点区域。
+    const canFix = t ? canTouchTask(t, modOf(t.mod, deps), ctxOf(userStore.state)) : false;
     return `<div class="prob" data-task="${p.taskId}">
       <div class="prob-top"><span class="ico ${p.type}">${PROB_ICO[p.type] || '!'}</span>
         <span class="prob-name">${t ? deps.sched.nameOf(t) : '未知任务'}</span></div>
       <div class="prob-desc">${p.desc}</div>
-      <div class="prob-actions">
+      ${canFix ? `<div class="prob-actions">
         <button class="btn primary" data-act="auto" title="自动调整至依赖与资源可用时间">自动调整</button>
         <button class="btn ghost" data-act="ignore" title="保留现状并忽略此问题">忽略</button>
-      </div></div>`;
+      </div>` : ''}</div>`;
   }).join('');
   list.querySelectorAll('.prob').forEach(item => {
     const taskId = item.dataset.task;
