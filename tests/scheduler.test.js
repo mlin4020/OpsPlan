@@ -986,14 +986,65 @@ describe('scheduler: 按目标粒度的守卫', () => {
     expect(planStore.state.resources.length).toBe(before);
   });
 
-  it('协作者不能动里程碑（含自己需求里的：因为需求 owner 不是他）', () => {
+  // ⚠️ 里程碑用例必须用**真正的里程碑**（有 m 键、无 res 键）。
+  //   初版误用了 'm1-cfm' —— 它是普通任务（p:'cfm'、res:['钱七']、无 m），
+  //   moveMilestone 会在"找不到 target"处提前 return，msGuard 的 milestone 分支一次都没执行，
+  //   用例在"无守卫 / 守卫退回 task 分支"时也全绿（空转）。
+  //   真正的里程碑是 default-data.js:62 的 { m:"2026-09-09", label:"9/9 上线" }（无 id，由 collect() 惰性生成）。
+  const findMs = sched => sched.tasks().find(t => t.isMs && t.mod === '官网改版');
+
+  it('协作者不能动无主需求里的里程碑', () => {
     const sched = makeSched();
     asCollab();
-    // 默认数据的「官网改版」没有 owner 字段 = 无主 → 协作者对它没有归属权
-    const ms = sched.getTask('m1-cfm');
+    // default-data.js:62 的 { m:"2026-09-09", label:"9/9 上线" } 才是真里程碑（无 res 键）
+    const ms = findMs(sched);
     expect(ms).toBeTruthy();
-    sched.moveMilestone('m1-cfm', '2026-10-01');
-    expect(sched.getTask('m1-cfm').m).not.toBe('2026-10-01');
+    expect(ms.m).toBe('2026-09-09');
+    sched.moveMilestone(ms.id, '2026-10-01');
+    expect(sched.getTask(ms.id).m).toBe('2026-09-09');    // 没被改动
+  });
+
+  it('协作者能改**自己需求**里的里程碑（需求创建人全权）', () => {
+    const sched = makeSched();
+    asCollab();
+    const mo = planStore.state.modules.find(m => m.name === '官网改版');
+    mo.owner = '张三';                                     // 让它成为张三的需求
+    const ms = findMs(sched);
+    expect(ms).toBeTruthy();
+    sched.moveMilestone(ms.id, '2026-10-01');
+    expect(sched.getTask(ms.id).m).toBe('2026-10-01');    // 允许改
+  });
+
+  // Important-1 的入口直证：编辑分支对里程碑必须走 {kind:'milestone'}，
+  // 否则 taskMine 对"无 res 的里程碑"返回 false → 协作者在**自己的需求**里点这两条也没反应。
+  it('协作者能在自己需求里编辑里程碑（抽屉保存 / 右键标记完成 / 切手动）', () => {
+    const sched = makeSched();
+    asCollab();
+    planStore.state.modules.find(m => m.name === '官网改版').owner = '张三';
+    const ms = findMs(sched);
+
+    // 抽屉保存：改 label + 上线日（saveTask 编辑分支）
+    sched.saveTask(ms.id, { type: 'ms', name: '张三的上线', start: '2026-10-05' });
+    expect(sched.getTask(ms.id).label).toBe('张三的上线');
+    expect(sched.getTask(ms.id).m).toBe('2026-10-05');
+
+    // 右键「切换手动/自动」
+    sched.saveTask(ms.id, { type: 'ms', manual: false });
+    expect(sched.getTask(ms.id).manual).toBe(false);
+
+    // 右键「标记完成」：里程碑无完成度概念，done 被清掉，但不该被守卫拦掉（manual 要能写进去）
+    sched.saveTask(ms.id, { type: 'ms', manual: true, done: 100 });
+    expect(sched.getTask(ms.id).manual).toBe(true);
+    expect(sched.getTask(ms.id).done).toBeUndefined();
+  });
+
+  it('协作者不能在无主需求里编辑里程碑（抽屉保存同样被拦）', () => {
+    const sched = makeSched();
+    asCollab();
+    const ms = findMs(sched);
+    sched.saveTask(ms.id, { type: 'ms', name: '偷改', start: '2026-10-05' });
+    expect(sched.getTask(ms.id).label).toBe('9/9 上线');
+    expect(sched.getTask(ms.id).m).toBe('2026-09-09');
   });
 
   // ⚠️ 这里刻意分成"无主"与"自己的"两条，因为它们的**权限结论相反**。
@@ -1043,11 +1094,32 @@ describe('scheduler: 按目标粒度的守卫', () => {
     expect(planStore.state.versions.some(x => x.id === vid)).toBe(true);   // 没被删掉
   });
 
-  it('协作者不能一键自动计划 / 撤销 / 导入', () => {
+  // 标题只写它**真正覆盖**的范围（初版标题写了"撤销 / 导入"却只断言 computeSchedule）。
+  // 撤销 / 导入各自拆了专条（见下两条），因为它们的语义不同：undo 返回 false，importJSON 是 throw。
+  it('协作者不能一键自动计划（computeSchedule 静默不生效）', () => {
     const sched = makeSched();
     asCollab();
     const before = JSON.stringify(planStore.state.modules);
     sched.computeSchedule();
+    expect(JSON.stringify(planStore.state.modules)).toBe(before);
+  });
+
+  it('协作者不能撤销（数据层拦截，不止按钮 disabled）', () => {
+    const sched = makeSched();
+    asFull();
+    sched.saveTask('m1-req', { name: '全权改的' });   // 制造一个可撤销的历史快照
+    expect(sched.canUndo()).toBe(true);
+    asCollab();
+    expect(sched.undo()).toBe(false);                 // 被守卫拦下
+    expect(sched.getTask('m1-req').name).toBe('全权改的');   // 没被回滚
+  });
+
+  it('协作者不能导入（importJSON 抛错，数据不变）', () => {
+    const sched = makeSched();
+    asCollab();
+    const before = JSON.stringify(planStore.state.modules);
+    const payload = JSON.stringify({ modules: [{ name: '被导入', tag: '冲刺中', tagc: '#000', bars: [] }] });
+    expect(() => sched.importJSON(payload)).toThrow('只读模式');
     expect(JSON.stringify(planStore.state.modules)).toBe(before);
   });
 

@@ -126,9 +126,17 @@ export function createMutations(ctx) {
     // 编辑分支按"这条任务现在归谁"判定 —— 注意用 old 的 res，不能用 draft.res，
     // 否则协作者把自己的任务 res 改成别人就能绕过（改完就成别人的了，本不该允许改）
     const isNew = !raw;
+    // 编辑分支必须**按任务形态分流**：里程碑没有 res 键，若一律走 {kind:'task'}，
+    // taskMine 对非数组 res 返回 false → 协作者连「自己需求里的里程碑」都改不了
+    // （抽屉保存 label/上线日、右键标记完成、切换手动/自动都会静默无反应）。
+    // 与 msGuard 同一口径：里程碑跟需求归属（canTouchTask → canEditMilestone → canManageModule）。
+    // 新增分支统一 res：调用方不传 res 时归一为空数组 = 待认领，与 saveTask 新建语义一致，
+    // 否则 {res: undefined} 会让 taskMine 判 false，协作者连未指派任务都建不了。
     const guard = isNew
       ? { kind: 'taskNew', res: (draft && draft.res) || [] }
-      : { kind: 'task', task: raw };
+      : (raw.m
+          ? { kind: 'milestone', ms: raw, mo: findMod(raw) }
+          : { kind: 'task', task: raw });
     if (!assertEditable(isNew, guard)) return;
     if (!raw) return;
     // 类型判定：draft 未显式带 type 时（如"新建后补写依赖"这类局部更新）必须沿用任务原始类型。
@@ -205,7 +213,7 @@ export function createMutations(ctx) {
       if (b.m && b.id === msId) target = b;
     }));
     if (!target) return;
-    target.m = fmt(newDate);
+    target.m = fmt(F(newDate));   // 与 setMilestoneDate 同口径：入参可能是 'YYYY-MM-DD' 字符串
     target.manual = true;   // 拖拽落位视为手动锁定，避免自动计划覆盖
     ctx.save();
   }
@@ -265,9 +273,10 @@ export function createMutations(ctx) {
 
   // 重命名任务：普通任务改 name，里程碑改 label；传空字符串则清除自定义名回退默认
   function renameTask(taskId, name) {
-    if (!assertEditable(false, { kind: 'task', task: findRawBar(taskId) })) return;
+    // findRawBar 是双重循环全量扫描 → 只取一次；定位不到时退回最严（不带 target）
     const raw = findRawBar(taskId);
-    if (!raw) return;
+    if (!raw) { assertEditable(false); return; }
+    if (!assertEditable(false, { kind: 'task', task: raw })) return;
     const n = (name == null ? '' : String(name)).trim();
     if (raw.isMs) { if (n) raw.label = n; else delete raw.label; }
     else { if (n) raw.name = n; else delete raw.name; }
@@ -276,9 +285,9 @@ export function createMutations(ctx) {
 
   // 删除任务：从所属需求的 bars 中移除，同时清理其他任务对该任务的依赖引用，重建索引并持久化
   function deleteTask(taskId) {
-    if (!assertEditable(false, { kind: 'task', task: findRawBar(taskId) })) return;
-    const raw = findRawBar(taskId);
-    if (!raw) return;
+    const raw = findRawBar(taskId);   // 只扫一次（同上）
+    if (!raw) { assertEditable(false); return; }
+    if (!assertEditable(false, { kind: 'task', task: raw })) return;
     const mo = findMod(raw);
     if (!mo) return;
     const idx = mo.bars.indexOf(raw);
@@ -294,8 +303,10 @@ export function createMutations(ctx) {
   // 新增任务：opts = { mod, p, name?, type:'task'|'ms', start, dur?, res?, manual }
   //   普通任务 = 周期 dur（默认 1 天），里程碑 = 单点上线日 m；返回新任务 id
   function addTask(opts) {
-    // 按"打算派给谁"判定：未分配（res 为空）的任务协作者也能建
-    assertEditable(true, { kind: 'taskNew', res: opts.res });
+    // 按"打算派给谁"判定：未分配（res 为空）的任务协作者也能建。
+    // 必须归一为 []：`taskMine` 对非数组 res 返回 false，若某个调用点不传 res
+    // 就会把"建未指派任务"判成"改别人的任务"而抛错（与 saveTask 的 (draft.res)||[] 同口径）。
+    assertEditable(true, { kind: 'taskNew', res: opts.res || [] });
     const mo = (getState().modules || []).find(m => m.name === opts.mod);
     if (!mo) throw new Error('需求不存在：' + opts.mod);
     const p = opts.p || 'dev';
