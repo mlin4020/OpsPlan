@@ -3272,7 +3272,37 @@ import { ctxOf, canTouchTask } from '../utils/permission.js';
         }
 ```
 
-同样，`sched.resizeTask(...)`（现 `:175`）与「一键修复」的调用点若收到 `{pinned}`，按同样方式提示。
+**⚠️ 但只改 `planning.js` 的三条路径是漏的（2026-10-23 发现）**：`collectAffected` 有 **5 处**被直接调用、
+**根本不经过 `cascade`**。协作者走这些路径时仍会把别人的任务推走 → 服务端拒 → 保存失败（Task 6 会回滚，
+用户看到"无权修改他人负责的任务"）：
+
+| 位置 | 触发路径 | 协作者可达 |
+|---|---|---|
+| `planning.js:243` | `resolveIgnore` / `unignore` 一类 | ✅ |
+| `mutations.js:204` | `moveMilestone`（拖里程碑） | ✅ |
+| `mutations.js:530` | `pinModToDate`（`updateModule` 的待排期联动 / 版本钉上线日） | ✅ |
+| `mutations.js:842` | `resizeTask`（拖右边缘改工期） | ✅ |
+| `mutations.js:677` | `archiveVersionMods` | ❌（仅全权） |
+
+**所以不要在每个调用点各写一份判断——把安全放进去共路径**（与 Task 7 的 `default → 最严` 同一思路）：
+
+```js
+// 唯一的入口。内部按模式分流，调用方无从绕过。
+//   全权 → 原全量 BFS，pinned 恒为 []
+//   协作者 → 断链 BFS：遇到 !canTouchTask 的节点就钉 manual 并停止该分支
+// dryRun：预览用，只收集 pinned 不写 manual（预览绝不能有副作用）
+function collectAffected(anchorId, opts) { ... 返回 { affected: Set, pinned: string[] } }
+```
+
+然后**把这 5 处 + `cascade`/`previewCascade`/`resolveAuto` 共 8 处**统一改成解构返回值
+（`const { affected } = ctx.collectAffected(id)` 之类）。`previewCascade` 传 `{ dryRun: true }`。
+
+`ctx.collectAffected` 的返回类型从 `Set` 变成 `{affected, pinned}`，**8 处调用点必须全部改到**——
+请 grep `collectAffected` 核对，并在报告里给出"命中数 vs 已改数"。
+
+**`drag.js` 的提示**：`sched.cascade(barDrag.taskId, newStart)`（现 `:191`）现在返回 `{ pinned }`，
+若 `pinned.length` 则 `deps.onSyncStatus('ok', { msg: ... })` 提示（简报正文有现成代码）。
+`resizeTask` 同理——它现在也应把 `pinned` 返回出来，让 `drag.js` 的 resize 分支能提示。
 
 - [ ] **Step 6: 跑测试确认通过**
 
