@@ -442,8 +442,8 @@ function bindTaskDrawerControls(deps) {
       mod,   // 归属变更：改需求（跨需求移动）/ 阶段
       p
     };
-    // 抽屉保存：日期没变时 saveTask 不跑级联（不会钉人）；日期真的变了才可能钉住下游他人任务，
-    // 那种情况必须提示，不能只说"已保存"（否则"我碰了别人的任务"在界面上完全不可见）
+    // 抽屉保存：**排期输入没变**时 saveTask 不跑级联（不会钉人）；日期/依赖/手动开关变了都可能
+    // 钉住下游他人任务，那种情况必须提示，不能只说"已保存"（否则"我碰了别人的任务"在界面上完全不可见）
     const saved = deps.sched.saveTask(curTaskId(deps), draft);
     closeDrawer(deps);
     deps.render();

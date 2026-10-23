@@ -54,7 +54,8 @@ function dispatchTaskMenu(key, taskId, deps, atDate) {
   } else if (key === 'complete') {
     const done = (t.done || 0) >= 100 ? 0 : 100;
     // 显式带 type：避免 saveTask 把里程碑误转成普通任务
-    // saveTask 只在日期变化时级联（改了完成度不会级联），这里仍走统一提示以防未来改动失守
+    // saveTask 只在排期输入（s/e/m、dep、manual true→false）变化时级联，只改完成度不会级联；
+    // 这里仍走统一提示以防未来改动失守
     const r = deps.sched.saveTask(taskId, { type: t.isMs ? 'ms' : 'task', done });
     deps.render();
     notifyPinned(deps, r, done === 100 ? '已标记完成' : '已重置进度');

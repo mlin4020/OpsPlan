@@ -1341,9 +1341,8 @@ describe('scheduler: 级联断链', () => {
 // s/e/m 有变化 → 本次提交"动了别人的任务"却没有任何日期变化 → 钉住被 42501 拒 →
 // save_plan 整体失败 + 回滚。结论：只要下游有别人的任务，协作者连保存都做不了。
 //
-// 判据因此落在"锚点自己的 s/e/m 变没变"上：
-//   没变 → 不跑级联 → 不钉人 → 保存必然通过
-//   变了 → 跑级联 → 钉住有依据 → 服务端 v_moved 非空 → 特许①成立
+// 判据因此从"无条件级联"收窄（⚠️ 本轮只看 s/e/m 的版本已被下一组用例判为回归，
+// 正确口径见下方「修复轮 2」的 describe：排期输入 = s/e/m + dep + manual true→false）。
 // 两条用例必须能**区分**：下面第一条在"无条件级联"的实现下会红（pinned=['B']、
 // B.manual 被改成 true），第二条在"改了日期也不级联"的实现下会红。
 // ============================================================
@@ -1428,5 +1427,117 @@ describe('scheduler: saveTask 只在日期变化时级联（修复轮）', () =>
     expect(sched.takePinned()).toEqual(['B']);      // 钉住结果没被丢掉
     expect(sched.getTask('B').manual).toBe(true);
     expect(sched.takePinned()).toEqual([]);         // 取走即清空（不会污染之后的操作）
+  });
+});
+
+// ============================================================
+// 修复轮 2：把「只在日期变化时级联」的判据放宽到"排期输入变了"
+//
+// 上一轮的判据只看 s/e/m，对**全权用户**也生效 → 违反 Task 8 的"零行为变化"：
+//   全权用户在抽屉里取消「手动」（manual true→false）而日期没变 → 不跑级联 →
+//   任务可能一直停在违反依赖的日期上（它原来是手动 = 允许违规，取消手动后就不该停留）。
+//   只改 dep 而日期没变同理：依赖是排期**输入**，输入变了输出就必须重算。
+// 服务端 v_moved 已同步认同这两种变化（迁移 user_permission_rbac_step2c_v_moved_widen，
+// 实测：只取消手动 + 钉下游他人 → PASS；只改 dep + 钉下游他人 → PASS；凭空钉人仍 REJECT），
+// 所以前端放宽到与之一致不会出现"前端钉了、服务端拒了"。
+// 反向 manual false→true 是"钉住"，自己不动，**不能**算排期输入变化（此时跑级联 =
+// 自己没动却去钉下游 → 服务端会拒）。
+// ============================================================
+describe('scheduler: saveTask 的级联判据是"排期输入变了"（修复轮 2）', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+
+  // A(张三) → B(李四，自动)。建链必须在切身份之前（协作者建不了派给别人的任务）
+  function chain() {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    return sched;
+  }
+
+  // ── 用例 1（本回归的直证）────────────────────────────────────────
+  // 全权用户取消手动、日期一个没改：必须跑级联，把"停在违规日期上"的任务纠正回来。
+  // 为什么"重排"在这里**可观测**：collectAffected 的 affected 集合**含锚点自身**，
+  //   recomputeAffected 对手动任务的语义是"保持现状"，对 manual:false + 有依赖的任务是
+  //   "重排到依赖允许的最早工作日"。所以 manual true→false 本身就把锚点从"保持"切成"重排"，
+  //   只要它当前日期违反依赖（手工拖到前置之前），日期就会被纠正 —— 不是恒真断言。
+  it('全权用户取消手动、日期没改：仍跑级联并把违反依赖的日期纠正回来', () => {
+    const sched = makeSched();
+    // A: 2026-09-10(四) 起 2 个工作日 → 结束 09-11(五)
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-10', dur: 2, res: ['张三'], id: 'A' });
+    // B: 手工拖到前置**之前**（09-01，周二），且 manual:true（手动允许违规）
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-01', dur: 1, res: ['张三'], id: 'B' });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+
+    // 前提：确实处于"违反依赖"的状态（否则下面的断言测不出东西）
+    expect(sched.getTask('B').manual).toBe(true);
+    expect(sched.getTask('B').s < sched.getTask('A').e).toBe(true);
+
+    // 抽屉里只取消「手动」，日期/工作量/负责人/依赖原样回传（s/e 一个没变）
+    const r = sched.saveTask('B', {
+      type: 'task', res: ['张三'], dep: [{ id: 'A', lag: 0 }],
+      start: '2026-09-01', dur: 1, manual: false
+    });
+
+    expect(sched.getTask('B').manual).toBe(false);
+    // A.e = 09-11(五) → 前置次日 09-12(六) 顺延到 09-14(一)，资源空闲 → 落在 09-14
+    expect(sched.getTask('B').s).toBe('2026-09-14');
+    expect(r.pinned).toEqual([]);                  // 全权用户照旧不钉人
+  });
+
+  // ── 用例 2（上一轮已有，确认放宽后仍绿）──────────────────────────
+  // 协作者打开抽屉、什么都不改就保存：dep 内容相同（JSON 相等）且 manual 没从 true 翻 false
+  // → 判据必须仍是 false。判据写成恒 true 的话这条立刻变红（pinned=['B']）。
+  it('协作者什么都没改只保存：pinned 为空、下游他人任务仍是自动', () => {
+    const sched = chain();
+    asCollab();
+
+    const a = sched.getTask('A');
+    const r = sched.saveTask('A', {
+      type: 'task', res: [...a.res], dep: a.dep.map(d => ({ ...d })),
+      start: a.s, dur: a.w, manual: a.manual
+    });
+
+    expect(r && r.pinned).toEqual([]);
+    expect(sched.getTask('B').manual).toBe(false);
+  });
+
+  // ── 用例 3（新依据的前端侧）────────────────────────────────────
+  // 协作者只改 dep、日期一个没改：下游他人任务仍要被钉住（服务端 v_moved 认 dep 变化）。
+  it('协作者只改 dep、日期没改：下游他人任务仍被钉住，pinned 含它', () => {
+    const sched = chain();
+    asCollab();
+    // 张三给自己新建一个前置 P（协作者能建派给自己的任务）
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-08-25', dur: 1, res: ['张三'], id: 'P' });
+
+    const r = sched.saveTask('A', {
+      type: 'task', res: ['张三'], dep: [{ id: 'P', lag: 0 }],
+      start: '2026-09-01', dur: 1, manual: true      // s/e/m 全部原样
+    });
+
+    expect(sched.getTask('A').s).toBe('2026-09-01');  // A 自己没动（日期未变）
+    expect(r.pinned).toEqual(['B']);                  // ← 钉住有依据（A 的 dep 变了）
+    expect(sched.getTask('B').manual).toBe(true);
+  });
+
+  // 反向：manual false→true 是"钉住"，不是排期输入变化 → 不跑级联、不钉下游。
+  // （否则协作者把下游他人任务改成手动就会连带钉人，服务端 v_moved 为空 → 42501）
+  it('协作者把 manual 从自动改回手动、日期没变：不跑级联，pinned 为空', () => {
+    const sched = chain();
+    // 前提：A 先处于「自动」（否则下面测的就不是 false→true 的翻转）
+    sched.saveTask('A', { type: 'task', res: ['张三'], dep: [], start: '2026-09-01', dur: 1, manual: false });
+    asCollab();
+    expect(sched.getTask('A').manual).toBe(false);
+
+    const a = sched.getTask('A');
+    const r = sched.saveTask('A', {
+      type: 'task', res: ['张三'], dep: a.dep.map(d => ({ ...d })),
+      start: a.s, dur: a.w, manual: true
+    });
+
+    expect(r.pinned).toEqual([]);
+    expect(sched.getTask('B').manual).toBe(false);
   });
 });

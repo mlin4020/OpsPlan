@@ -155,11 +155,17 @@ export function createMutations(ctx) {
           : { kind: 'task', task: raw });
     if (!assertEditable(isNew, guard)) return;
     if (!raw) return;
-    // 【比较点 ①：应用 draft 之前】记下这条任务原来的排期锚点（s/e/m）。
-    // 用途见函数末的"只在日期真的变了才级联"—— 协作者只是打开抽屉点保存（一个日期没改）
-    // 时绝不能跑级联：collectAffected 的断链判定在 BFS 遍历时就把下游他人任务钉成 manual，
-    // 而服务端 v_moved 只认 s/e/m 有变化 → 钉住被 42501 拒 → save_plan 整体失败 + 回滚。
-    const before = { s: raw.s, e: raw.e, m: raw.m };
+    // 【比较点 ①：应用 draft 之前】记下这条任务原来的**排期输入**：
+    //   锚点 s/e/m —— 输出
+    //   dep       —— 输入（依赖决定最早可开始）
+    //   manual    —— 输入（手动=保持现状，自动=交给引擎重排）
+    // 用途见函数末的"排期输入变了才级联"。给 dep 做 JSON 快照：后面 raw.dep 会被整体替换，
+    // 记引用是不够的（也怕历史数据里 dep 为 undefined）。
+    const before = {
+      s: raw.s, e: raw.e, m: raw.m,
+      dep: JSON.stringify(raw.dep || []),
+      manual: !!raw.manual
+    };
     // 类型判定：draft 未显式带 type 时（如"新建后补写依赖"这类局部更新）必须沿用任务原始类型。
     // 否则里程碑会被当成"转成普通任务"处理 → delete raw.m 降级成任务，且 res 未初始化，
     // 后续 recomputeAffected 读 t.res.forEach 直接抛 TypeError。
@@ -224,13 +230,24 @@ export function createMutations(ctx) {
     //    collect() 只回写 id/mod/isMs/manual/res，**不碰 s/e/m**，所以比较点放在它之后是安全的：
     //    此时索引里登记的已是同一个 raw 对象（引用不变），且 draft 的全部日期写入都已生效。
     ctx.collect();
-    // 【比较点 ②：级联之前】只有排期锚点真的变了才级联重排后置子图。
-    //   没变（协作者打开抽屉点保存、只改名字/进度/依赖但日期没动）→ 不跑级联 → 不钉人 → 保存必然通过；
+    // 【比较点 ②：级联之前】"排期输入变了"才级联重排后置子图。
+    //   没变 → 不跑级联 → 不钉人 → 保存必然通过（协作者打开抽屉点保存、只改名字/进度都走这条）；
     //   变了 → 跑级联，钉住有依据（服务端 v_moved 非空，特许①成立）。
-    //   只改 dep 而不改日期时不跑是刻意的：本任务没有移动，就没有东西需要传播给它下游
-    //   （若强行跑，会在自己日期没变的情况下钉住下游 → 正好触发上面那条 42501）。
-    const moved = raw.s !== before.s || raw.e !== before.e || raw.m !== before.m;
-    if (!moved) {
+    //
+    // ⚠️ 判据**不能**只看 s/e/m：那对全权用户也生效，会把 Task 8 的"零行为变化"破坏掉。
+    //   取消手动（manual true→false）= 这条任务从此交给引擎排期；它当前很可能停在
+    //   违反依赖的日期上（手动态允许违规），不跑级联就一直停在错误日期。
+    //   改 dep = 排期输入变了，输出（日期）必须重算，否则新依赖要等到下次拖拽才生效。
+    // 反向 manual false→true 是"钉住"，自己不动，**不算**输入变化 —— 此时跑级联会在
+    //   "自己没动"的情况下去钉下游 → 服务端 v_moved 为空 → 42501。
+    // 服务端 assert_plan_editable 的 v_moved 已同步认同 dep 变化与 manual true→false
+    //   （迁移 user_permission_rbac_step2c_v_moved_widen），故放宽后不会"前端钉了、服务端拒了"。
+    const depChanged = JSON.stringify(raw.dep || []) !== before.dep;
+    const manualWentAuto = before.manual && !raw.manual;
+    const schedulingChanged =
+      raw.s !== before.s || raw.e !== before.e || raw.m !== before.m
+      || depChanged || manualWentAuto;
+    if (!schedulingChanged) {
       ctx.save();
       return { pinned: [] };
     }
