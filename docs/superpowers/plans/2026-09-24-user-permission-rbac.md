@@ -3587,7 +3587,36 @@ function refreshUI(doc) {
 
 顶部 import 追加 `import { ctxOf } from './permission.js';`
 
-- [ ] **Step 4: 确认 `refreshUI` 在 access 就绪后被调用**
+- [ ] **Step 4a: 先修 `leaveReadonly` 的 fail-open（2026-10-23 补充，本任务必须先做）**
+
+`src/utils/readonly.js` 的 `leaveReadonly()` 现在**只写 `readonly: false`、不写 `access`**。后果：
+
+```js
+// ctxOf 的兜底（Task 1，不能改）：
+const access = s.readonly ? READONLY
+             : (s.access === COLLAB || s.access === FULL) ? s.access
+             : ACCESS.FULL;                 // ← 兜底
+```
+
+从只读切回编辑时，`readonly` 变 false 而 `access` 仍是 `'readonly'` → 落进兜底 → **翻成 `full`**。
+也就是"一个只读用户点一下切换就变成全权"。当前生产没接这个切换（已 grep 确认无调用点），
+但本任务开始动按钮分组，一旦有人接上就是提权。
+
+**修**（在**写入侧**修，**绝对不要动 `ctxOf` 的兜底**——Task 1 的测试锁着它，且它是"先装守卫、后放权"的前提）：
+
+```js
+// leaveReadonly：恢复成"按身份算出来的 access"，而不是只把 readonly 置 false
+export function leaveReadonly(doc, deps) {
+  const access = resolveAccess({ role: ..., isOwner: ..., resourceName: ... });  // 用真源重算
+  userStore.set({ readonly: access === ACCESS.READONLY, access });
+  ...
+}
+```
+
+并补一条测试：**只读用户调 `leaveReadonly` 后不得变成 `full`**（`access` 必须仍是 `readonly`）。
+这条是变异敏感的——把修复退回"只写 `readonly:false`"，它必须变红。
+
+- [ ] **Step 4b: 确认 `refreshUI` 在 access 就绪后被调用**
 
 `refreshUI` 由 `enterReadonly` / `leaveReadonly` 触发。检查 `src/main-gantt.js` 的 `initProject()`：`userStore.set({ isOwner, access, readonly })` 之后才 `wireUI()`（内部会走只读初始化）。
 **若只读未触发（协作者不 readonly），`refreshUI` 不会被调用 → `FULL_ONLY` 按钮不会灰化。** 在 `initProject` 里 `userStore.set({...})` 之后补一行显式刷新：
