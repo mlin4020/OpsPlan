@@ -2,7 +2,7 @@
 // plan-sync.js — 排期数据与服务器的同步（loadFromServer / pushToServer）
 // 统一走 backend.loadPlan / savePlan，不感知具体后端实现
 // ============================================================
-import { loadPlan, savePlan, errMsg } from './projects.js';
+import { loadPlan, savePlan, errMsg, isDenied } from './projects.js';
 import { fmt } from '../core/dates.js';
 
 const CALC_VER = 5;
@@ -87,6 +87,29 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
       });
   }
 
+  // 权限拒绝后的回滚：拉回服务器版本覆盖本地。
+  // 刻意不复用 loadFromServer()：后者会 resetHistory/recordInitial，
+  // 那会把"改坏了"的本地快照一起洗掉，用户就没法用撤销退回去了。
+  // 走 planStore.set 而不是 ctx.save()，因此不会再触发一次 pushToServer（不会死循环）。
+  function rollbackFromServer() {
+    const projectId = userStore.state.projectId;
+    if (!projectId) return;
+    loadPlan(projectId)
+      .then(({ data, error }) => {
+        if (error || !data) return;
+        const plan = data.plan || data;
+        if (!Array.isArray(plan.modules)) return;
+        planStore.set({
+          modules: plan.modules,
+          resources: Array.isArray(plan.resources) && plan.resources.length ? plan.resources : planStore.state.resources,
+          versions: Array.isArray(plan.versions) ? plan.versions : []
+        });
+        if (schedRef && typeof schedRef.collect === 'function') schedRef.collect();
+        if (schedRef && typeof schedRef.applyCycle === 'function') schedRef.applyCycle();
+      })
+      .catch(() => { /* 回滚都失败就只能等下次刷新，不额外报错打扰 */ });
+  }
+
   function pushToServer() {
     const projectId = userStore.state.projectId;
     if (!projectId || userStore.state.readonly) return Promise.resolve(false);
@@ -95,6 +118,13 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
     return savePlan(projectId, payload)
       .then(({ error }) => {
         if (error) {
+          // 服务端校验拒绝是"乐观更新"架构下的常态路径：本地已经改过了、服务端不接受。
+          // 必须回滚，否则界面显示的状态与库里不一致，用户会以为改成功了。
+          if (isDenied(error)) {
+            notifySync('fail', { msg: errMsg(error) + '（已回滚到服务器版本，你的改动未保存）' });
+            rollbackFromServer();
+            return false;
+          }
           notifySync('fail', { msg: errMsg(error) });
           return false;
         }

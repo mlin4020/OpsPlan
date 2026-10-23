@@ -8,7 +8,8 @@ import { userStore } from '../src/store/user-store.js';
 const mocks = vi.hoisted(() => ({
   loadPlan: vi.fn(),
   savePlan: vi.fn(),
-  errMsg: vi.fn(e => e && e.message || '')
+  errMsg: vi.fn(e => e && e.message || ''),
+  isDenied: vi.fn(() => false)
 }));
 vi.mock('../src/services/projects.js', () => mocks);
 
@@ -154,5 +155,55 @@ describe('supabase client 单例', () => {
     const second = supabaseService.getClient();
     expect(second).toBe(fakeClient);   // 必须仍返回缓存，而非 null
     vi.unstubAllGlobals();
+  });
+});
+
+describe('plan-sync: 服务端权限拒绝 → 回滚', () => {
+  beforeEach(() => {
+    planStore.reset();
+    userStore.reset();
+    mocks.loadPlan.mockReset();
+    mocks.savePlan.mockReset();
+    mocks.isDenied.mockReset();
+    mocks.isDenied.mockReturnValue(false);
+    mocks.errMsg.mockReset();
+    mocks.errMsg.mockImplementation(e => (e && e.message) || '');
+  });
+
+  it('被拒时用服务器版本覆盖本地（回滚），并透出服务端的具体原因', async () => {
+    userStore.set({ projectId: 'p1' });
+    planStore.set({ modules: [{ name: '本地乱改的', bars: [] }], resources: [], versions: [] });
+    mocks.savePlan.mockResolvedValue({ error: { code: '42501', message: '无权修改他人负责的任务（id=x）' } });
+    mocks.isDenied.mockReturnValue(true);
+    mocks.loadPlan.mockResolvedValue({
+      data: { plan: { modules: [{ name: '服务器版本', bars: [] }], resources: [], versions: [] } },
+      error: null
+    });
+
+    const { sync, onSyncStatus } = makeDeps();
+    const ok = await sync.pushToServer();
+
+    expect(ok).toBe(false);
+    expect(onSyncStatus).toHaveBeenCalledWith('fail', {
+      msg: expect.stringContaining('无权修改他人负责的任务（id=x）')
+    });
+    // 回滚是异步的，等一个 tick
+    await new Promise(r => setTimeout(r, 0));
+    expect(mocks.loadPlan).toHaveBeenCalledWith('p1');
+    expect(planStore.state.modules[0].name).toBe('服务器版本');
+  });
+
+  it('非权限类失败不回滚（网络抖动不该丢掉本地改动）', async () => {
+    userStore.set({ projectId: 'p1' });
+    planStore.set({ modules: [{ name: '本地改动', bars: [] }], resources: [], versions: [] });
+    mocks.savePlan.mockResolvedValue({ error: { code: '57014', message: '超时' } });
+    mocks.isDenied.mockReturnValue(false);
+
+    const { sync } = makeDeps();
+    await sync.pushToServer();
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(mocks.loadPlan).not.toHaveBeenCalled();
+    expect(planStore.state.modules[0].name).toBe('本地改动');
   });
 });

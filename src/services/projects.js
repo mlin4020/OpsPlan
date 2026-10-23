@@ -25,15 +25,25 @@ export function deleteProject(id) { return call('deleteProject', id); }
 export function loadPlan(projectId) { return call('loadPlan', projectId); }
 export function savePlan(projectId, plan) { return call('savePlan', projectId, plan); }
 
-// 错误处理
+// 服务端校验拒绝的判定（设计文档 §6.2）：
+//   PostgREST 把 plpgsql 的 raise ... using errcode 原样带出（code = '42501'）
+export function isDenied(error) {
+  if (!error) return false;
+  if (error.code === '42501') return true;
+  return /无权|未指定对应人员|仅管理员/.test(String(error.message || ''));
+}
+
+// 错误文案：权限拒绝必须原样透出服务端的中文原因。
+// 改造前这里把 42501 统一压成「无权限修改该项目」—— 那是行级策略时代的文案，
+// 现在服务端会告诉我们"到底哪一条规则被触发"，笼统化会让用户不知道该怎么办。
 export function errMsg(error) {
   if (!error) return '';
-  if (error.code === '42501') return '无权限修改该项目';
+  if (error.code === '42501') return error.message || '无权限执行该操作';
   return error.message || '操作失败';
 }
 
 export default {
   listUsers, listUserOptions, setAdmin,
   listProjects, getProject, createProject, updateProject, deleteProject,
-  loadPlan, savePlan, errMsg
+  loadPlan, savePlan, errMsg, isDenied
 };

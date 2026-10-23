@@ -144,9 +144,9 @@ export const supabaseBackend = {
   async savePlan(projectId, plan) {
     const miss = needClient();
     if (miss) return miss;
-    return getClient()
-      .from('projects')
-      .update({ plan, updated_at: new Date().toISOString() })
-      .eq('id', projectId);
+    // 唯一写入口：走 RPC，由服务端做身份判定与细粒度校验（migration.sql 的 save_plan）。
+    // 不再直接 PATCH projects —— RLS 的 projects_update 只放行 owner/admin，
+    // 协作者直接 PATCH 会被拒；RPC 是 SECURITY DEFINER，把规则判定收回服务端。
+    return getClient().rpc('save_plan', { p_project_id: projectId, p_plan: plan });
   },
 };
