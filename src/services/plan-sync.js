@@ -41,13 +41,17 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
   function applyPlanToStore(plan) {
     if (!Array.isArray(plan.modules)) {
       planStore.set({ modules: [], resources: [], versions: [] });
-      return;
+    } else {
+      planStore.set({
+        modules: plan.modules,
+        resources: Array.isArray(plan.resources) && plan.resources.length ? plan.resources : planStore.state.resources,
+        versions: Array.isArray(plan.versions) ? plan.versions : []
+      });
     }
-    planStore.set({
-      modules: plan.modules,
-      resources: Array.isArray(plan.resources) && plan.resources.length ? plan.resources : planStore.state.resources,
-      versions: Array.isArray(plan.versions) ? plan.versions : []
-    });
+    // 索引与周期**两条路都要重建**（含空排期短路分支）：
+    // 索引必须紧跟 modules 重算；applyCycle 在 tasks 为空时会回退默认窗口，
+    // 恰好是"清空后把 start/end 收回默认"的正确结果 —— 不调就会留着旧项目的周期。
+    // 旧版空排期分支曾显式调 collect()，抽取时被并进 else 分支而漏掉，此处统一。
     if (schedRef && typeof schedRef.collect === 'function') schedRef.collect();
     if (schedRef && typeof schedRef.applyCycle === 'function') schedRef.applyCycle();
   }
@@ -83,29 +87,34 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
       });
   }
 
-  // 并发保护：每次进入 pushToServer 自增，回滚响应回来时比对。
-  // 场景：A 被拒 → 回滚请求在途 → 用户又改 B 并保存成功 → 回滚才返回" A 之前"的旧版本。
-  // 若不过滤，这一次 set 会把刚存成功的 A+B 整体覆盖回旧数据，而库里是 A+B。
-  // 因此过期的回滚响应直接丢弃（不写 store、不写 localStorage）。
-  let epoch = 0;
+  // 并发保护："成功保存"的版本号。**只有 error 为空（保存真的落到服务器）才自增**。
+  // 判据是"有更新的**成功保存**"，不是"有更新的推送"（修复轮 2 纠正）：
+  //   - 场景：A 被拒 → 回滚请求在途 → 用户又改 B 并**保存成功** → 回滚才返回"A 之前"的旧版本。
+  //     若不过滤，这一次 set 会把刚存成功的 A+B 覆盖回旧数据，而库里是 A+B → 过期响应必须丢弃。
+  //   - 反例（旧判据在入口 ++ 的错处）：另一次保存只是**网络异常/reject**，或同一防抖窗口里的
+  //     第二次被拒推送 —— 它们都没让服务器上的数据更新，若也算"过期"，一个本该生效的回滚会被丢弃，
+  //     本地就停在服务端拒绝的那份改动上。故入口不自增。
+  let committed = 0;
 
   // 权限拒绝后的回滚：拉回服务器版本覆盖本地。
   // 刻意不复用 loadFromServer()：后者会 resetHistory/recordInitial，
   // 那会把"改坏了"的本地快照一起洗掉，用户就没法用撤销退回到改动前了。
   // 走 planStore.set / applyPlanToStore 而不是 ctx.save()，因此不会再触发一次 pushToServer（不会死循环）。
-  // 返回 Promise<boolean>：true 表示已成功回滚（调用方据此给用户准确结论）。
-  function rollbackFromServer(myEpoch) {
+  // committedAtStart：发起回滚的那一刻"最近一次成功保存"的序号。
+  // 返回 'rolled' | 'failed' | 'stale'：
+  //   rolled 已把服务器版本写回；failed 拉取/校验失败；stale 期间有更新的成功保存、结论作废。
+  function rollbackFromServer(committedAtStart) {
     const projectId = userStore.state.projectId;
-    if (!projectId) return Promise.resolve(false);
-    const stale = () => myEpoch !== undefined && myEpoch !== epoch;
-    if (stale()) return Promise.resolve(false);
+    if (!projectId) return Promise.resolve('failed');
+    const stale = () => committedAtStart !== undefined && committedAtStart !== committed;
+    if (stale()) return Promise.resolve('stale');
 
     return loadPlan(projectId)
       .then(({ data, error }) => {
-        if (stale()) return false;        // 期间又发生了新的保存 → 旧快照已无意义
-        if (error || !data) return false;
+        if (stale()) return 'stale';      // 期间有保存真的落到服务器 → 这份旧快照已无意义
+        if (error || !data) return 'failed';
         const plan = data.plan || data;
-        if (!Array.isArray(plan.modules)) return false;
+        if (!Array.isArray(plan.modules)) return 'failed';
         applyPlanToStore(plan);
         // 把服务器版本落回 localStorage 兜底：persistence.save() 在推送**之前**就把
         // 被拒的 plan 写进了 localStorage，只改内存会让离线打开/加载失败时看到被拒的改动。
@@ -113,16 +122,15 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
         if (schedRef && typeof schedRef.persistLocal === 'function') {
           try { schedRef.persistLocal(); } catch (e) { /* 兜底写入失败不影响回滚结论 */ }
         }
-        return true;
+        return 'rolled';
       })
-      .catch(() => false);
+      .catch(() => 'failed');
   }
 
   function pushToServer() {
     const projectId = userStore.state.projectId;
     if (!projectId || userStore.state.readonly) return Promise.resolve(false);
 
-    const myEpoch = ++epoch;
     const payload = buildPayload({ planStore, userStore });
     return savePlan(projectId, payload)
       .then(({ error }) => {
@@ -132,22 +140,26 @@ export function createPlanSync({ planStore, userStore, sched, onSyncStatus }) {
           if (isDenied(error)) {
             // 措辞只说"正在恢复"：此刻回滚请求还没回来，不能提前断言结果。
             notifySync('fail', { msg: errMsg(error) + '（正在恢复服务器版本，你的改动未保存）' });
-            return rollbackFromServer(myEpoch).then((rolled) => {
-              if (!rolled && myEpoch === epoch) {
+            return rollbackFromServer(committed).then((result) => {
+              if (result === 'failed') {
                 // 回滚失败（或没有可用的服务器版本）：界面上仍是那份被拒的改动，必须明说。
-                // 过期则静默 —— 期间已有更新的保存，用户界面对齐的是新数据而非旧快照。
                 notifySync('fail', { msg: '恢复服务器版本失败，请刷新页面' });
               }
+              // result === 'stale' 时**不提示**：期间已有更新的保存成功，界面/库里对齐的是
+              // 那份更新的数据，本次回滚结论已无意义，再弹一条只会误导用户去"刷新"。
               return false;
             });
           }
           notifySync('fail', { msg: errMsg(error) });
           return false;
         }
+        committed += 1;                   // 保存真的成功 → 此前发出的回滚结论全部作废
         notifySync('ok', { savedBy: payload.savedBy, savedAt: payload.savedAt });
         return true;
       })
       .catch(() => {
+        // 没到过服务器（网络异常 / promise reject）：不推进 committed，
+        // 一次"没能到达服务器"的保存不该作废前一次回滚的结论。
         notifySync('fail', { msg: '无法连接服务器' });
         return false;
       });

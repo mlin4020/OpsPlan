@@ -26,10 +26,16 @@ export function loadPlan(projectId) { return call('loadPlan', projectId); }
 export function savePlan(projectId, plan) { return call('savePlan', projectId, plan); }
 
 // 服务端校验拒绝的判定（设计文档 §6.2）：
-//   PostgREST 把 plpgsql 的 raise ... using errcode 原样带出（code = '42501'）
+//   PostgREST 把 plpgsql 的 raise ... using errcode 原样带出（code = '42501'）。
+// ⚠️ 用 String(...) 比较而不是 ===：PostgREST 不同版本/不同传输路径上可能把 code 序列化成
+//   数字 42501，严格字符串比较会让两条判定同时失效（既不算拒绝、也不透出服务端原因）。
+function isPermissionCode(code) {
+  return code !== undefined && code !== null && String(code) === '42501';
+}
+
 export function isDenied(error) {
   if (!error) return false;
-  if (error.code === '42501') return true;
+  if (isPermissionCode(error.code)) return true;
   return /无权|未指定对应人员|仅管理员/.test(String(error.message || ''));
 }
 
@@ -38,7 +44,7 @@ export function isDenied(error) {
 // 现在服务端会告诉我们"到底哪一条规则被触发"，笼统化会让用户不知道该怎么办。
 export function errMsg(error) {
   if (!error) return '';
-  if (error.code === '42501') return error.message || '无权限执行该操作';
+  if (isPermissionCode(error.code)) return error.message || '无权限执行该操作';
   return error.message || '操作失败';
 }
 

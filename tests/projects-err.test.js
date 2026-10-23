@@ -21,6 +21,12 @@ describe('projects.isDenied（真实实现，设计文档 §6.2）', () => {
     expect(isDenied({ code: '42501', message: 'permission denied' })).toBe(true);
   });
 
+  // 修复轮 2：code 可能被序列化成数字。严格 === '42501' 会让判定失效
+  // （既不算拒绝、errMsg 也不透出服务端 message）。
+  it('code = 42501（数字）→ 仍判为拒绝', () => {
+    expect(isDenied({ code: 42501, message: 'permission denied' })).toBe(true);
+  });
+
   it('P0002「项目不存在」→ 不判为拒绝（非权限类，回滚没有意义）', () => {
     expect(isDenied({ code: 'P0002', message: '项目不存在' })).toBe(false);
   });
@@ -60,6 +66,12 @@ describe('projects.errMsg（真实实现）', () => {
 
   it('42501 但无 message → 兜底「无权限执行该操作」', () => {
     expect(errMsg({ code: '42501' })).toBe('无权限执行该操作');
+  });
+
+  it('42501（数字 code）→ 同样透出/兜底（不因类型不同而退化成通用文案）', () => {
+    expect(errMsg({ code: 42501, message: '无权修改他人负责的任务（id=t9）' }))
+      .toBe('无权修改他人负责的任务（id=t9）');
+    expect(errMsg({ code: 42501 })).toBe('无权限执行该操作');
   });
 
   it('非 42501 → 透出 message', () => {

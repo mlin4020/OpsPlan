@@ -199,8 +199,8 @@ describe('plan-sync: 服务端权限拒绝 → 回滚', () => {
     mocks.savePlan.mockResolvedValue({ error: { code: '57014', message: '超时' } });
 
     const { sync } = makeDeps();
+    // 回滚已纳入 await 链：pushToServer resolve 时该发生的都发生了，无需再等一个 tick
     await sync.pushToServer();
-    await new Promise(r => setTimeout(r, 0));
 
     expect(mocks.loadPlan).not.toHaveBeenCalled();
     expect(planStore.state.modules[0].name).toBe('本地改动');

@@ -32,6 +32,9 @@ export function createPersistence(ctx) {
   //   plan-sync 回滚成功后也调它，把服务器版本落回本地兜底 —— 否则 localStorage 里
   //   留着那份"被服务端拒绝的 plan"，离线打开或服务端加载失败时用户会看到被拒的改动。
   //   ⚠️ 回滚链路**绝不能**改调 ctx.save()：那会再推一次 → 被拒 → 再回滚，死循环。
+  //   ⚠️ 载荷与 buildPayload() 有**已知的不对称**：这里不含 savedBy / start / end，
+  //      而 load() 也只读 modules/resources/versions —— 本地兜底不承载"谁保存、什么周期"。
+  //      这是改造前 save() 内联版本就有的形状，此处忠实保留；若要补齐必须同时改 load()。
   function persistLocal() {
     try {
       localStorage.setItem(ctx.KEY(), JSON.stringify({
