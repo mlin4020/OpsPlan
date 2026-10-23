@@ -133,6 +133,7 @@ export function createScheduler({ planStore, userStore, W, sync }) {
     resolveIgnore: planning.resolveIgnore,
     unignore: planning.unignore,
     saveTask: mutations.saveTask,
+    setProgress: mutations.setProgress,
     previewCascade: planning.previewCascade,
     resizeTask: mutations.resizeTask,
     previewResize: planning.previewResize,

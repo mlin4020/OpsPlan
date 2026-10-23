@@ -283,6 +283,27 @@ export function createMutations(ctx) {
     ctx.save();
   }
 
+  // 设置任务完成度（0–100 整数）。
+  // 为什么单独一条：saveTask 的编辑分支不写 done（从既有值继承），
+  // 而 { complete: true } 只能表达"100%"，没法表达"我现在 40%"。
+  // 改进度不影响日期，因此刻意不做 recomputeAffected —— 进度与排期是正交的两件事。
+  function setProgress(taskId, pct) {
+    const raw = taskId ? findRawBar(taskId) : null;
+    if (!raw) return null;
+    if (raw.m) return null;                       // 里程碑是 0 天单点，没有完成度概念
+    // ⚠️ 必须在 Number() **之前**挡掉空值：
+    //   Math.round(Number('')) === 0 且 Number.isFinite(0) === true，
+    //   Number(null) === 0 同理 —— 只靠 isFinite 会把 ''/null 静默写成 0%（而不是 NaN）。
+    if (pct == null || String(pct).trim() === '') return null;
+    const n = Math.round(Number(pct));
+    if (!Number.isFinite(n)) return null;         // 真正的非数值（'abc' → NaN）
+    if (!assertEditable(false, { kind: 'task', task: raw })) return null;
+    const v = Math.max(0, Math.min(100, n));
+    raw.done = v;
+    ctx.save();                                   // 落进撤销栈，可 Ctrl+Z 撤回
+    return v;
+  }
+
   // 删除任务：从所属需求的 bars 中移除，同时清理其他任务对该任务的依赖引用，重建索引并持久化
   function deleteTask(taskId) {
     const raw = findRawBar(taskId);   // 只扫一次（同上）
@@ -881,7 +902,7 @@ export function createMutations(ctx) {
   return {
     assertEditable, nameOf,
     saveTask, moveMilestone, setMilestoneDate, changeTaskType,
-    renameTask, deleteTask, addTask, addModule, updateModule, archiveModule, deleteModule, moveModule, moveBar, resizeTask,
+    renameTask, setProgress, deleteTask, addTask, addModule, updateModule, archiveModule, deleteModule, moveModule, moveBar, resizeTask,
     // 版本（迭代）
     createVersion, updateVersion, shipVersion, deleteVersion, removeModFromVersion, setModuleVersion, archiveVersionMods,
     updateResource, addResource, deleteResource

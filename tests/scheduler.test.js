@@ -1138,3 +1138,87 @@ describe('scheduler: 按目标粒度的守卫', () => {
     expect(() => sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1 })).toThrow('只读模式');
   });
 });
+
+describe('scheduler: setProgress', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+
+  it('写入归一化后的整数百分比', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('m1-req', 40)).toBe(40);
+    expect(sched.getTask('m1-req').done).toBe(40);
+  });
+
+  it('越界与小数被钳制/取整，非法值不动数据', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('m1-req', 140)).toBe(100);
+    expect(sched.getTask('m1-req').done).toBe(100);
+    expect(sched.setProgress('m1-req', -20)).toBe(0);
+    expect(sched.getTask('m1-req').done).toBe(0);
+    expect(sched.setProgress('m1-req', 33.7)).toBe(34);
+    // 非数值（含空串）→ 直接返回 null，不把 done 写成 NaN
+    expect(sched.setProgress('m1-req', '')).toBe(null);
+    expect(sched.setProgress('m1-req', 'abc')).toBe(null);
+    expect(sched.getTask('m1-req').done).toBe(34);
+  });
+
+  it('空值与纯空白 → null 且不把 done 写成 0（Number("")===0 陷阱）', () => {
+    const sched = makeSched();
+    // 先落一个非 0 的基线，若归一化链条漏了前置判据，'' / '   ' / null / undefined 都会被写成 0
+    expect(sched.setProgress('m1-req', 55)).toBe(55);
+    for (const bad of ['', '   ', null, undefined, 'abc']) {
+      expect(sched.setProgress('m1-req', bad)).toBe(null);
+      expect(sched.getTask('m1-req').done).toBe(55);
+    }
+  });
+
+  it('不存在的任务 / 里程碑 → null 且不报错', () => {
+    const sched = makeSched();
+    expect(sched.setProgress('no-such-id', 50)).toBe(null);
+    // ⚠️ 真里程碑是 default-data.js:62 的 { m:"2026-09-09", label:"9/9 上线" }（原始数据无 id，
+    //   由 collect() 惰性补上）。**m1-cfm 是普通任务**（p:"cfm"、res:["钱七"]、无 m 键），
+    //   拿它当里程碑会让这条断言空转——Task 7 已经踩过同一个坑。
+    const ms = sched.tasks().find(t => t.isMs && t.mod === '官网改版');
+    expect(ms).toBeTruthy();
+    expect(ms.m).toBe('2026-09-09');
+    expect(sched.setProgress(ms.id, 50)).toBe(null);
+    expect(sched.getTask(ms.id).done).toBeUndefined();
+  });
+
+  it('协作者能改自己负责的任务', () => {
+    const sched = makeSched();
+    asCollab();
+    expect(sched.setProgress('m1-req', 60)).toBe(60);      // res = ["张三"]
+  });
+
+  it('协作者改不了别人负责的任务（静默不生效）', () => {
+    const sched = makeSched();
+    asCollab();
+    const before = sched.getTask('m1-sit').done;           // res = ["吴十"]
+    expect(sched.setProgress('m1-sit', 60)).toBe(null);
+    expect(sched.getTask('m1-sit').done).toBe(before);
+  });
+
+  it('数据层对未分配任务仍然放行（本页的"未分配只读"是界面口径，不是数据层口径）', () => {
+    const sched = makeSched();
+    asCollab();
+    // 显式造一条未分配任务
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: [], id: 'U' });
+    expect(sched.setProgress('U', 30)).toBe(30);
+  });
+
+  it('只读模式拦下', () => {
+    const sched = makeSched();
+    userStore.set({ readonly: true });
+    expect(sched.setProgress('m1-req', 50)).toBe(null);
+  });
+
+  it('改进度不改变任何日期（不触发重排）', () => {
+    const sched = makeSched();
+    const before = JSON.stringify(planStore.state.modules.map(m => m.bars.map(b => [b.s, b.e, b.m])));
+    sched.setProgress('m1-req', 80);
+    const after = JSON.stringify(planStore.state.modules.map(m => m.bars.map(b => [b.s, b.e, b.m])));
+    expect(after).toBe(before);
+  });
+});
