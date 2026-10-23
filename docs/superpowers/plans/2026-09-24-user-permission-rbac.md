@@ -2632,15 +2632,31 @@ describe('scheduler: 按目标粒度的守卫', () => {
     expect(sched.getTask('m1-cfm').m).not.toBe('2026-10-01');
   });
 
-  it('协作者能改自己需求的元数据字段，但不能改名/删/归档', () => {
+  // ⚠️ 这里刻意分成"无主"与"自己的"两条，因为它们的**权限结论相反**。
+  //   决策 §1.1-13 是「需求创建人有该需求所有权限（改名/删除/归档/转交）」，
+  //   所以归属人可以给自己需求改名/归档；无主需求才轮不到协作者。
+  //   （初版这里写成"协作者不能给自己需求改名/归档"，与设计直接冲突，属计划缺陷，2026-10-23 修正。）
+  it('协作者对**无主需求**不能改名（归档已由下一条覆盖）', () => {
+    const sched = makeSched();
+    asCollab();
+    // 默认数据的「官网改版」没有 owner 字段 = 无主 → 协作者对它没有归属权
+    expect(() => sched.updateModule({ name: '官网改版', oldName: '官网改版', name: '改名' })).toThrow();
+    expect(planStore.state.modules.some(m => m.name === '官网改版')).toBe(true);   // 没被改掉
+  });
+
+  it('协作者能改**自己的需求**的字段，也能改名 / 归档（需求创建人全权）', () => {
     const sched = makeSched();
     asCollab();
     sched.addModule({ name: '我的需求', autoCreate: false });   // owner = 张三
+    // 字段级
     sched.updateModule({ name: '我的需求', pri: 'P0' });
     expect(planStore.state.modules.find(m => m.name === '我的需求').pri).toBe('P0');
-    expect(() => sched.updateModule({ name: '我的需求', oldName: '我的需求', name: '改名' })).toThrow();
-    sched.archiveModule('我的需求', true);
-    expect(!!planStore.state.modules.find(m => m.name === '我的需求').archived).toBe(false);
+    // 归属级：改名（需求创建人有权）
+    sched.updateModule({ oldName: '我的需求', name: '我的需求V2' });
+    expect(planStore.state.modules.some(m => m.name === '我的需求V2')).toBe(true);
+    // 归属级：归档（同上）
+    sched.archiveModule('我的需求V2', true);
+    expect(!!planStore.state.modules.find(m => m.name === '我的需求V2').archived).toBe(true);
   });
 
   it('协作者能改无主需求的字段，但不能归档它', () => {
