@@ -12,7 +12,11 @@ async function call(method, ...args) {
 // 用户管理
 export function listUsers() { return call('listUsers'); }
 export function listUserOptions() { return call('listUserOptions'); }
-export function setAdmin(userId) { return call('setAdmin', userId); }
+// 编辑用户：改名 / 改角色 / 指定"对应人员"。取代原来的 setAdmin(userId)
+//（setAdmin 无法表达"降级为普通用户"与"指定人名"，而这两件正是本次要补的）
+export function updateProfile(userId, patch) { return call('updateProfile', userId, patch); }
+// 「对应人员」候选（list_resource_names()）：拼错的人名会让人"什么都改不了"且极难排查
+export function listResourceNames() { return call('listResourceNames'); }
 
 // 项目 CRUD
 export function listProjects() { return call('listProjects'); }
@@ -49,7 +53,7 @@ export function errMsg(error) {
 }
 
 export default {
-  listUsers, listUserOptions, setAdmin,
+  listUsers, listUserOptions, updateProfile, listResourceNames,
   listProjects, getProject, createProject, updateProject, deleteProject,
   loadPlan, savePlan, errMsg, isDenied
 };

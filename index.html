@@ -33,6 +33,9 @@ body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;backgroun
 .btn.sm{padding:5px 10px;font-size:12px}
 .btn.disabled{opacity:.5;cursor:not-allowed;pointer-events:none}
 .err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
+/* 字段级说明与禁用态：禁用必须看得出来（「为什么这个框改不了」不能只靠 tooltip） */
+.field .hint{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5}
+.field input:disabled,.field select:disabled{background:#f1f5f9;color:var(--muted);cursor:not-allowed}
 #viewMain{display:none;min-height:100vh}
 .hero{background:linear-gradient(135deg,var(--hero-deep),var(--hero));color:#fff;padding:14px 28px;display:flex;align-items:center;gap:18px}
 .hero .brand{color:var(--hero-soft);margin:0}
@@ -52,6 +55,9 @@ body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;backgroun
 .spacer{flex:1}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 6px;border-radius:9px;background:var(--blue);color:#fff;font-size:10px;font-weight:800}
 .badge.admin{background:var(--amber)}
+/* 「未指定对应人员」：该账号登录后是纯只读。必须和「管理员」区分开，
+   否则一行里两个同色徽标，谁都不知道哪个是问题提示 */
+.badge.warn{background:#f97316;color:#fff}
 .empty{padding:50px;text-align:center;color:var(--muted);font-size:13px;background:#fff;border:1px dashed var(--line);border-radius:12px}
 .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:50}
 .modal-mask.show{display:flex}
@@ -171,6 +177,31 @@ body{font-family:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif;backgroun
       <button class="btn primary" id="btnNuSave">创建</button>
       <span class="spacer"></span>
       <button class="btn ghost" id="btnNuCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="maskEditUser">
+  <div class="modal">
+    <h3>编辑用户</h3>
+    <div class="field"><label>姓名</label><input type="text" id="inpEuName"></div>
+    <div class="field"><label>角色</label>
+      <select id="selEuRole">
+        <option value="user">普通用户</option>
+        <option value="admin">管理员</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>对应人员（任务里的负责人名字）</label>
+      <input type="text" id="inpEuResName" list="resNameList" placeholder="留空 = 只能查看，不能编辑">
+      <datalist id="resNameList"></datalist>
+      <div class="hint">必须与任务「资源」里的人名一字不差；留空则该账号只能查看。</div>
+    </div>
+    <div class="err" id="euErr"></div>
+    <div class="modal-foot">
+      <button class="btn primary" id="btnEuSave">保存</button>
+      <span class="spacer"></span>
+      <button class="btn ghost" id="btnEuCancel">取消</button>
     </div>
   </div>
 </div>

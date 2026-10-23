@@ -86,3 +86,19 @@ export const canPlan = ctx => isFull(ctx);
 export const canEditProjectMeta = ctx => isFull(ctx);
 export const canDeleteProject = ctx => !!(ctx && ctx.role === 'admin');
 export const canManageUsers = ctx => !!(ctx && ctx.role === 'admin');
+
+// ---- 用户管理（Task 13）----
+// 改角色的两条保护。返回 { ok, reason }：ok=false 时下拉必须 disable，
+// reason 直接做 tooltip —— "为什么这个框改不了"必须写在界面上，否则会被当成 bug。
+// 这两条是**业务不变量**，不是身份判定：管理员也有不能做的事。
+export function roleChangeGuard(target, users, me) {
+  if (!target) return { ok: false, reason: '该用户已不在列表中，请刷新后重试' };
+  if (me && target.id === me.id) {
+    return { ok: false, reason: '不能修改自己的角色：误操作降级后就没人能改回来了' };
+  }
+  const admins = (users || []).filter(u => u && u.role === 'admin');
+  if (target.role === 'admin' && admins.length <= 1) {
+    return { ok: false, reason: '这是最后一个管理员，不能降级（否则系统将没有管理员）' };
+  }
+  return { ok: true, reason: '' };
+}

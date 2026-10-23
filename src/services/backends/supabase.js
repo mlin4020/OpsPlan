@@ -67,9 +67,11 @@ export const supabaseBackend = {
   async listUsers() {
     const miss = needClient();
     if (miss) return miss;
+    // resource_name 必须 select：用户管理页靠它渲染「未指定」徽标 ——
+    // 漏了它，每个人看起来都没配人名，而"为什么我什么都不能改"在界面上就没有线索了。
     return getClient()
       .from('profiles')
-      .select('id,display_name,role,created_at')
+      .select('id,display_name,role,resource_name,created_at')
       .order('created_at');
   },
 
@@ -82,10 +84,29 @@ export const supabaseBackend = {
       .order('display_name');
   },
 
-  async setAdmin(userId) {
+  // 编辑用户：只允许改这三个字段 —— role 与 resource_name 由服务端的
+  // profiles_guard_sensitive 触发器兜底，非管理员改会被拒（42501）。
+  // 因此这个页面天然只能由管理员使用（非管理员调用会拿到服务端的中文拒绝原因）。
+  async updateProfile(userId, patch = {}) {
     const miss = needClient();
     if (miss) return miss;
-    return getClient().from('profiles').update({ role: 'admin' }).eq('id', userId);
+    const body = {};
+    if (patch.display_name != null) body.display_name = String(patch.display_name).trim();
+    if (patch.role != null) body.role = patch.role === 'admin' ? 'admin' : 'user';
+    if (patch.resource_name != null) {
+      const rn = String(patch.resource_name).trim();
+      body.resource_name = rn || null;      // 空串 → NULL = 未指定（只读）
+    }
+    return getClient().from('profiles').update(body).eq('id', userId);
+  },
+
+  // 「对应人员」候选。服务端已 btrim + distinct（见 migration.sql 5.6），这里只解包。
+  async listResourceNames() {
+    const miss = needClient();
+    if (miss) return miss;
+    const { data, error } = await getClient().rpc('list_resource_names');
+    if (error) return { data: null, error };
+    return { data: (data || []).map(r => r.name), error: null };
   },
 
   // ---- projects ----

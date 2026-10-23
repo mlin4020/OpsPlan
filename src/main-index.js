@@ -12,9 +12,10 @@
 import { getSession, getUser, getProfile, logout, signUp, friendlyAuthError, snapshotSession, restoreSession, isGuest, leaveGuest } from './services/auth.js';
 import {
   listProjects, getProject, createProject, updateProject, deleteProject,
-  listUsers, listUserOptions, setAdmin
+  listUsers, listUserOptions, updateProfile, listResourceNames, errMsg
 } from './services/projects.js';
 import { restoreTheme } from './utils/theme.js';
+import { roleChangeGuard } from './utils/permission.js';
 
 // 主题配色：与排期页共用同一份 localStorage，保证「项目列表 → 排期页」品牌色一致。
 // 放在模块顶层（早于任何渲染）执行，避免首屏先闪默认色。
@@ -80,29 +81,86 @@ function renderProjects() {
   grid.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openEditProj(b.dataset.edit)));
 }
 
+let usersCache = [];
+
 async function loadUsers() {
+  // 用户管理只能用管理员身份：updateProfile 写 role / resource_name 会被服务端
+  // profiles_guard_sensitive 触发器拒（42501），非管理员进来必然处处失败。
+  // 面板本身也是 isAdmin() 才显示（enterApp），这里再收一道，避免以后有别的入口。
   if (!isAdmin()) return;
   const { data, error } = await listUsers();
   if (error) return;
+  usersCache = data || [];
   const ul = $('userList');
-  ul.innerHTML = (data || []).map(u => {
+  ul.innerHTML = usersCache.map(u => {
     const isMe = u.id === me.id;
+    // 「未指定」是本次的漏配发现机制：没配 resource_name 的人登录后是纯只读，
+    // 而"为什么我什么都不能改"在界面上完全没有别的线索 —— 必须在这里显式标出来
+    const rn = String(u.resource_name == null ? '' : u.resource_name).trim();
+    const rnCell = rn
+      ? '<span class="time">' + esc(rn) + '</span>'
+      : '<span class="badge warn" title="未指定对应人员：该账号登录后只能查看，不能编辑">未指定</span>';
     return '<div class="user-row">' +
       '<span class="avatar" style="background:' + (u.role === 'admin' ? '#f59e0b' : '#3b82f6') + '">' + esc((u.display_name || '?').slice(0, 1)) + '</span>' +
       '<span style="font-weight:600">' + esc(u.display_name || '--') + '</span>' +
       (u.role === 'admin' ? '<span class="badge admin">管理员</span>' : '') +
       (isMe ? '<span class="badge">我</span>' : '') +
+      rnCell +
       '<span class="spacer"></span>' +
       '<span class="time">' + fmtTime(u.created_at) + '</span>' +
-      (isAdmin() && !isMe ? '<button class="btn sm ghost" data-setadmin="' + u.id + '">设为管理员</button>' : '') +
+      '<button class="btn sm ghost" data-edituser="' + u.id + '">编辑</button>' +
     '</div>';
   }).join('');
-  ul.querySelectorAll('[data-setadmin]').forEach(b => b.addEventListener('click', async () => {
-    if (confirm('确认将该用户设为管理员？')) {
-      const { error } = await setAdmin(b.dataset.setadmin);
-      if (error) alert('操作失败：' + error.message); else loadUsers();
-    }
-  }));
+  ul.querySelectorAll('[data-edituser]').forEach(b => b.addEventListener('click', () => openEditUser(b.dataset.edituser)));
+}
+
+// ---------- 编辑用户 ----------
+let editingUser = null;
+
+// 候选人名：拼错的 resource_name 会让那人"什么都改不了"且极难排查，所以必须给候选
+async function fillResNameOptions() {
+  const { data } = await listResourceNames();
+  const dl = $('resNameList');
+  if (dl && data) dl.innerHTML = data.map(n => '<option value="' + esc(n) + '"></option>').join('');
+}
+
+function openEditUser(id) {
+  const u = usersCache.find(x => x.id === id);
+  if (!u) return;
+  editingUser = u;
+  $('inpEuName').value = u.display_name || '';
+  $('selEuRole').value = u.role === 'admin' ? 'admin' : 'user';
+  $('inpEuResName').value = u.resource_name || '';
+  $('euErr').textContent = '';
+
+  // 两条保护统一由 permission.roleChangeGuard 判定（别在 UI 里散落 if/else，
+  // 否则以后加第三条保护时必然漏掉某条路径）
+  const guard = roleChangeGuard(u, usersCache, me);
+  const sel = $('selEuRole');
+  sel.disabled = !guard.ok;
+  sel.title = guard.reason || '';
+
+  $('maskEditUser').classList.add('show');
+}
+
+async function saveEditUser() {
+  if (!editingUser) return;
+  const name = $('inpEuName').value.trim();
+  if (!name) { $('euErr').textContent = '姓名不能为空'; return; }
+  const patch = {
+    display_name: name,
+    // 空串 → 后端转 null（未指定）。空字符串会让"没配"和"配了个空名字"混在一起。
+    resource_name: $('inpEuResName').value.trim()
+  };
+  // 角色下拉被 disable 时（自己 / 最后一个管理员）不提交 role，避免撞服务端触发器
+  if (!$('selEuRole').disabled) patch.role = $('selEuRole').value;
+
+  const { error } = await updateProfile(editingUser.id, patch);
+  // 服务端原因原样透出：42501 时用户需要知道"哪条规则被触发"，笼统文案无从下手
+  if (error) { $('euErr').textContent = errMsg(error); return; }
+  closeModal('maskEditUser');
+  loadUsers();
+  fillOwnerSelects();
 }
 
 function enterApp() {
@@ -119,7 +177,7 @@ function enterApp() {
     enterGuestMode();
   }
   loadProjects();
-  if (me && isAdmin()) { loadUsers(); fillOwnerSelects(); }
+  if (me && isAdmin()) { loadUsers(); fillOwnerSelects(); fillResNameOptions(); }
 }
 
 // ---------- 游客模式（未登录，只读浏览） ----------
@@ -251,6 +309,8 @@ function bindEvents() {
   $('btnNewUser').addEventListener('click', () => { $('inpNuName').value = ''; $('inpNuEmail').value = ''; $('inpNuPwd').value = ''; $('nuErr').textContent = ''; $('maskNewUser').classList.add('show'); });
   $('btnNuSave').addEventListener('click', saveNewUser);
   $('btnNuCancel').addEventListener('click', () => closeModal('maskNewUser'));
+  $('btnEuSave').addEventListener('click', saveEditUser);
+  $('btnEuCancel').addEventListener('click', () => closeModal('maskEditUser'));
   $('btnEditProjSave').addEventListener('click', saveEditProj);
   $('btnDelProj').addEventListener('click', delProj);
   $('btnEditProjCancel').addEventListener('click', () => closeModal('maskEditProj'));

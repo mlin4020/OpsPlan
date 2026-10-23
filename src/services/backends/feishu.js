@@ -84,7 +84,15 @@ export const feishuBackend = {
   async listUsers() {
     const { data, error } = await api('/api/auth/users');
     if (error) return { data: null, error };
-    return { data: data.users || [], error: null };
+    // resource_name 必须透出（取不到给空串，不给 undefined）：
+    // 用户管理页靠它判断「未指定」，undefined 会让那段判定多一层防御分支。
+    return {
+      data: (data.users || []).map(u => ({
+        ...u,
+        resource_name: u.resource_name == null ? '' : String(u.resource_name)
+      })),
+      error: null,
+    };
   },
 
   async listUserOptions() {
@@ -93,16 +101,30 @@ export const feishuBackend = {
     return { data: (data.users || []).map(u => ({ id: u.id, display_name: u.display_name })), error: null };
   },
 
-  async setAdmin(userId, isAdmin) {
-    // 飞书模式：直接更新人员表的"账号类型"字段
+  // 编辑用户：飞书人员表与账号是同一条记录，所以
+  //   role          → 「账号类型」
+  //   姓名          → 「姓名」（任务 res 里那个人名就是它：resource_name 与 display_name 同源）
+  // 仅对齐签名与字段，不做校验（飞书侧没有守卫触发器）。
+  async updateProfile(userId, patch = {}) {
     // 注意：bridge 没有专门端点，走通用 record update
+    const fields = {};
+    if (patch.display_name != null) fields['姓名'] = String(patch.display_name).trim();
+    // 显式传 resource_name 时以它为准（同名两个入参指向同一个字段，后写的赢）
+    if (patch.resource_name != null) fields['姓名'] = String(patch.resource_name).trim();
+    if (patch.role != null) fields['账号类型'] = patch.role === 'admin' ? 'admin' : 'user';
     const r = await fetch(base() + `/bitable/v1/apps/${window.FEISHU_CONFIG.appToken}/tables/${TABLES.resources}/records/${userId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: { '账号类型': isAdmin ? 'admin' : 'user' } }),
+      body: JSON.stringify({ fields }),
     });
-    if (!r.ok) return { error: { message: '设管理员失败' } };
+    if (!r.ok) return { error: { message: '保存用户失败' } };
     return { error: null };
+  },
+
+  // 飞书模式不提供候选：人员表只有「姓名」一个名字字段，没有独立的"对应人员"列，
+  // 也就没有可枚举的候选来源 —— 靠管理员人工填写。
+  async listResourceNames() {
+    return { data: [], error: null };
   },
 
   // ---- projects ----
