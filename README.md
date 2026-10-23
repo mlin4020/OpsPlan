@@ -38,7 +38,7 @@
 | **撤销 / 重做** | 快照栈，最多 50 步 |
 | **需求管理** | 状态标签、标识色、优先级 P0–P3、描述、需求文档、提出人与提出时间、生命周期（待确认/已确认/已提测/已上线，人工维护）、待排期；归档是**软状态**——归档后的需求仍参与依赖与资源计算，不会静默改变下游排期 |
 | **离线导出** | 一键导出**单文件 HTML**（数据注入、JS/CSS 全部内联），发给同事双击即可查看，且可离线继续改；也能导出 JSON 存档 |
-| **多项目与权限** | Supabase Auth 邮箱登录、admin / user 两级角色、项目负责人可编辑其余人只读、Postgres RLS 强制隔离 |
+| **多项目与权限** | Supabase Auth 邮箱登录；四种身份（管理员 / 项目所属人 / 协作者 / 只读），详见[多项目与权限](#多项目与权限)；细粒度权限由 `save_plan` RPC 在服务端强制，Postgres RLS 兜底 |
 | **主题与响应式** | 10 套主题（只换品牌色，完成绿/逾期红/卡点琥珀等数据语义色永不随主题变）；桌面 / 平板 / 手机三档断点共用同一份 DOM |
 
 ## 界面预览
@@ -94,8 +94,18 @@ window.SUPABASE_CONFIG = {
 ```
 
 ```sql
--- 3) 注册第一个账号后，把它提成管理员（否则没人能建项目）
+-- 3) 注册第一个账号后，把它提成管理员（否则没人能建项目、也进不了「用户管理」）
+--
+-- ⚠️ 不能直接 update：migration.sql 装了守卫触发器 profiles_guard_sensitive，
+--    它把所有"没有有效 JWT"的身份都当成非管理员 —— SQL 控制台里 auth.uid() 是 NULL，
+--    is_admin() 恒为 false，所以下面这条会直接报错 42501（已实测）：
+--      update public.profiles set role = 'admin' where display_name = '你的名字';
+--    正确做法：临时关掉触发器，改完再打开（需表属主权限，postgres / supabase_admin 有）
+alter table public.profiles disable trigger profiles_guard_sensitive;
 update public.profiles set role = 'admin' where display_name = '你的名字';
+alter table public.profiles enable trigger profiles_guard_sensitive;
+
+-- 或者更省事的顺序：先注册账号，再执行 migration.sql（第 2 步与第 3 步对调）
 ```
 
 ### 3. 常用命令
@@ -105,9 +115,52 @@ update public.profiles set role = 'admin' where display_name = '你的名字';
 | `npm run dev` | 开发服务器（端口 8000，`--host` 可暴露局域网） |
 | `npm run build` | 生产构建多页入口 → `dist/` |
 | `npm run build:export` | 生成单文件导出模板 `public/export-template.html` |
-| `npm test` | Vitest 跑全部单测（12 个文件 / 271 用例） |
+| `npm test` | Vitest 跑全部单测（22 个文件 / 744 用例） |
 
 > 改了 `src/` 之后要重新执行 `npm run build:export`，否则导出模板里还是旧代码。
+
+## 多项目与权限
+
+### 四种身份
+
+判定口径的唯一真源是 `src/utils/permission.js`（与服务端 `assert_plan_editable` 逐条对应）；
+设计与阈值见 [`docs/superpowers/specs/2026-09-24-user-permission-rbac-design.md`](docs/superpowers/specs/2026-09-24-user-permission-rbac-design.md)。
+
+| 身份 | 判定 | 能做什么 |
+|---|---|---|
+| **管理员** | `profiles.role = 'admin'` | 全部（另含删除项目、用户管理） |
+| **项目所属人** | `projects.owner_id = 我` | 该项目的全部编辑：任务、需求、资源库、自动计划、项目名 / 负责人 |
+| **协作者** | 已登录 且 `profiles.resource_name` 非空 | 改自己的任务与需求字段；需求改名 / 删除仅限自己创建的那条 |
+| **只读** | 其余（游客 / 登录了但没配人名） | 只能查看 |
+
+> 「协作者」与「只读」的分界线是**账号上有没有配「对应人员」**，不是邮箱域名或自助注册。
+
+### 首次部署必须做的两件事
+
+1. 执行 `deploy/supabase/migration.sql`；
+2. 用管理员账号进「用户管理」→ 逐个「编辑」→ 指定**对应人员**（下拉有候选，来自 `list_resource_names()`）。
+
+**在配完「对应人员」之前，所有账号都是只读。** 这是 `profiles.resource_name` 默认 NULL 的必然代价，
+也是刻意的安全默认：注册表单里姓名填「张三」不再等于直接拿到张三名下的全部权限。
+没配人名的账号在用户列表里会带橙色「未指定」徽标，这是漏配的唯一线索 —— 别忽略它。
+
+### 权限是服务端强制的，不是前端藏按钮
+
+- 细粒度权限由 **`save_plan` RPC 在服务端逐条校验**（`assert_plan_editable`），越权写入返回 `42501` + 中文原因；
+  前端把按钮灰掉只是减少误点，绕过前端直接调 RPC 一样会被拒。
+- **`projects_update` 策略未放宽**，仍只认 `owner_id` 或管理员：绕过 RPC 直连 `PATCH /rest/v1/projects` 仍被 RLS 拒（0 行更新）。
+- `projects_delete` 仍是 `is_admin()`，所以「删除项目」按钮只对管理员出现，普通所属人只能改名 / 换负责人。
+- 项目转交（换负责人）需要二次确认：转交后原所属人**当场失去管理权**且不能自恢复，只有管理员能改回。
+
+### 运维边界：改 role 为什么不能在 SQL 控制台直接改
+
+`migration.sql` 的守卫触发器 `profiles_guard_sensitive` 对**所有没有有效 JWT 的身份**生效
+（`psql` / SQL 控制台 / `service_role`）：那里 `auth.uid()` 是 NULL → `is_admin()` 为 false，
+`update public.profiles set role = 'admin' …` 会被拒（实测 `REJECT: 42501`）。
+
+- **应用内管理员改角色不受影响**：走 `updateProfile`（`services/projects.js` → `backends/supabase.js`），带管理员 JWT，判定走 `is_admin()`。
+- 受影响的只有"在 SQL 控制台 / psql 里直接改"这一条路。需要时按[快速开始](#2-接上后端必需)第 3 步临时关触发器。
+- 顺带的好处：任何登录用户都不能自己 `PATCH profiles` 把 `role` 改成 `admin`、也**不能**把 `resource_name` 写成一个不属于他的名字 —— 这两条以前都是敞开的。
 
 ## 架构
 
@@ -144,9 +197,9 @@ update public.profiles set role = 'admin' where display_name = '你的名字';
 │   ├── views/         # header · report-view · mod-view · res-view · archive-view · mod-card
 │   ├── components/    # shell · toolbar · drawers · modals · drag · context-menu
 │   │                  # reslib · theme-picker · sync-status · loading
-│   ├── utils/         # dom · export · readonly · theme
+│   ├── utils/         # dom · export · readonly · permission（权限判定唯一真源）· theme
 │   └── styles/gantt.css
-└── tests/             # Vitest：12 文件 / 271 用例
+└── tests/             # Vitest：22 文件 / 744 用例
 ```
 
 ## 技术选型：为什么一个框架都不用
@@ -174,7 +227,7 @@ CSS 用 CSS 变量做主题（`--accent` 一行切换全站品牌色），布局
 
 ```bash
 npm install
-npm test            # 271 用例应全绿
+npm test            # 744 用例应全绿
 npm run build       # 确认构建通过
 ```
 
