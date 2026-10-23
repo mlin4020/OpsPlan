@@ -3047,6 +3047,18 @@ describe('scheduler: 级联断链', () => {
   const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
   const asFull = () => userStore.set({ readonly: false, access: 'full', resourceName: '张三' });
 
+  // ⚠️⚠️ **凡是要造"别人的任务"（res:['李四']）的用例，必须先建链、再 `asCollab()`。**
+  //   原因：`addTask` 的守卫是"按**打算派给谁**判"（决策 B：新增任务负责人默认自己），
+  //   所以协作者张三**不能**新建一条 `res:['李四']` 的任务——那会被**正确地**拒绝并抛
+  //   "只读模式，无法修改"。若在 `asCollab()` 之后才 addTask 那条"别人的任务"，
+  //   用例测的就不是级联断链，而是 addTask 的守卫（2026-10-23 踩过这个坑）。
+  //
+  //   正确顺序：addTask(A:张三) → addTask(B:李四) → saveTask(建依赖) → **asCollab()** → cascade(...)
+  //   （`userStore.reset()` 默认 `access:'full'`，所以在 `asCollab()` 之前建链天然是全权身份。）
+  //
+  //   例外：全部 `res` 都是张三的用例（如「下游是自己人时不断链」），在 `asCollab()` 之后
+  //   addTask 没问题——协作者建"派给自己"的任务是允许的。
+
   it('全权用户：级联照旧，没有任何钉住（回归）', () => {
     const sched = makeSched();
     asFull();
