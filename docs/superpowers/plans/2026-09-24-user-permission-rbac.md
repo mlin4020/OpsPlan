@@ -2909,9 +2909,14 @@ describe('scheduler: setProgress', () => {
   it('不存在的任务 / 里程碑 → null 且不报错', () => {
     const sched = makeSched();
     expect(sched.setProgress('no-such-id', 50)).toBe(null);
-    // m1-cfm 是里程碑（0 天单点，没有完成度概念）
-    expect(sched.setProgress('m1-cfm', 50)).toBe(null);
-    expect(sched.getTask('m1-cfm').done).toBeUndefined();
+    // ⚠️ 真里程碑是 default-data.js:62 的 { m:"2026-09-09", label:"9/9 上线" }（原始数据无 id，
+    //   由 collect() 惰性补上）。**m1-cfm 是普通任务**（p:"cfm"、res:["钱七"]、无 m 键），
+    //   拿它当里程碑会让这条断言空转——Task 7 已经踩过同一个坑。
+    const ms = sched.tasks().find(t => t.isMs && t.mod === '官网改版');
+    expect(ms).toBeTruthy();
+    expect(ms.m).toBe('2026-09-09');
+    expect(sched.setProgress(ms.id, 50)).toBe(null);
+    expect(sched.getTask(ms.id).done).toBeUndefined();
   });
 
   it('协作者能改自己负责的任务', () => {
@@ -2970,8 +2975,12 @@ Expected: FAIL —— `sched.setProgress is not a function`
     const raw = taskId ? findRawBar(taskId) : null;
     if (!raw) return null;
     if (raw.m) return null;                       // 里程碑是 0 天单点，没有完成度概念
+    // ⚠️ 必须在 Number() **之前**挡掉空值：
+    //   Math.round(Number('')) === 0 且 Number.isFinite(0) === true，
+    //   Number(null) === 0 同理 —— 只靠 isFinite 会把 ''/null 静默写成 0%（而不是 NaN）。
+    if (pct == null || String(pct).trim() === '') return null;
     const n = Math.round(Number(pct));
-    if (!Number.isFinite(n)) return null;         // 空串 / 非数值 → 不动数据，避免写入 NaN
+    if (!Number.isFinite(n)) return null;         // 真正的非数值（'abc' → NaN）
     if (!assertEditable(false, { kind: 'task', task: raw })) return null;
     const v = Math.max(0, Math.min(100, n));
     raw.done = v;
