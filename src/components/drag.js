@@ -14,6 +14,7 @@
 //   win      - Window（缺省 doc.defaultView），用于 mousemove/mouseup 全局监听
 //   isReadonly - () => boolean，只读时不启动拖拽（复用 readonly.js）
 // ============================================================
+import { notifyPinned } from '../utils/pinned.js';
 
 let barDrag = null;    // 任务条整体拖动
 let barResize = null;  // 边缘调整工作量
@@ -150,13 +151,7 @@ function onMouseMove(e, deps) {
 
 // 钉住他人任务时必须说出来：否则"我碰了别人的任务"这件事在界面上完全不可见，
 // 出争议时查不出是谁引起的（被钉的任务自带「手动」锁图标，那是持久线索）。
-// 走 toast：同步状态区只显示"已同步+时间+保存人"，塞进 msg 的内容根本不会渲染。
-function notifyPinned(deps, r) {
-  const n = (r && Array.isArray(r.pinned)) ? r.pinned.length : 0;
-  if (!n || typeof deps.toast !== 'function') return;
-  deps.toast(`已钉住 ${n} 条他人任务为手动，风险面板会报出依赖冲突`);
-}
-
+// 提示实现已抽到 utils/pinned.js —— 抽屉保存 / 自动调整 / 需求补钉上线日 三条路径共用。
 // 全局 mouseup：按当前拖拽态落位
 function onMouseUp(deps) {
   const { sched, getCtx, gsc, render } = deps;

@@ -10,6 +10,7 @@
 // 逻辑一模一样（取数 → 写两处 badge），放一起才不会一个改了另一个忘改。
 // ============================================================
 import { setPanel } from './drawer-shell.js';
+import { notifyPinned } from '../utils/pinned.js';
 
 const PROB_ICO = { overlap: '!', depend: '↗', overdue: '⌛', cycle: '∞' };
 
@@ -64,7 +65,10 @@ export function renderProbList(deps) {
       btn.addEventListener('click', ev => {
         ev.stopPropagation();
         const act = btn.dataset.act;
-        if (act === 'auto') { deps.sched.resolveAuto(taskId); deps.toast('已自动调整排期'); }
+        // 「自动调整」会解锁本任务并重排其后置子图：协作者模式下遇到他人任务会把它钉成手动。
+        // 以前这里无条件说"已自动调整排期"，实际上很可能是"别人的任务被我锁成了手动"——
+        // 两种结果必须分开说，钉住时以钉住提示为准。
+        if (act === 'auto') notifyPinned(deps, deps.sched.resolveAuto(taskId), '已自动调整排期');
         else { deps.sched.resolveIgnore(taskId); deps.toast('已忽略该问题'); }
         renderProbList(deps);
         updateProblemBadge(deps);

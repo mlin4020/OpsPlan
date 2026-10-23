@@ -59,6 +59,19 @@ export { permCtx };
 export function createMutations(ctx) {
   const { getState, setState, W } = ctx;
 
+  // 被钉住的他人任务（跨人写入）暂存区。
+  // 为什么需要它：updateModule 的「待排期 → 已排期」会补钉上线里程碑并级联（见那里），
+  // 但 updateModule 的返回值是需求对象本身（被大量调用方依赖），塞不进 pinned。
+  // 于是把这类"没有直接结果通道"的钉住暂存下来，由 UI 调 sched.takePinned() 取走并提示 ——
+  // 钉住是唯一被特许的跨人写入（设计文档 §6.4 特许①），界面上必须说出来。
+  // ⚠️ 只放"一定会有调用方来取"的路径，否则陈旧的 id 会被后来的无关操作误报出去。
+  function pushPinned(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    if (!Array.isArray(ctx.pinnedOut)) ctx.pinnedOut = [];
+    list.forEach(id => { if (!ctx.pinnedOut.includes(id)) ctx.pinnedOut.push(id); });
+  }
+  ctx.pushPinned = pushPinned;
+
   // 任务显示名：自定义 name / 里程碑 label 优先，否则回退「需求 · 阶段」
   function nameOf(t) {
     if (!t) return '(未知任务)';
@@ -120,6 +133,9 @@ export function createMutations(ctx) {
   //   里程碑 = 0 天周期单点（b.m 上线日期），不参与资源排期但可作为依赖目标
   //   普通任务 = 周期 dur（结束 = 开始 + dur - 1）；manual 锁定日期，auto 由引擎重排并级联后置
   //   mod/p = 归属变更（抽屉编辑改需求/阶段）：跨需求移动时 id 不变，依赖引用不受影响
+  // 返回 { pinned:[id] }：本次级联中"被钉成手动的他人任务"。调用方必须提示出来
+  // （utils/pinned.js 的 notifyPinned）—— 那是唯一被特许的跨人写入，界面上不能隐形。
+  // 被守卫拦下（或新增分支）时返回 undefined，与改造前一致。
   function saveTask(taskId, draft) {
     const raw = findRawBar(taskId);   // 始终操作原始对象，保证持久化与里程碑一致性
     // 新增分支（raw 为空、committed 还没推入 bars）按"打算派给谁"判定；
@@ -139,6 +155,11 @@ export function createMutations(ctx) {
           : { kind: 'task', task: raw });
     if (!assertEditable(isNew, guard)) return;
     if (!raw) return;
+    // 【比较点 ①：应用 draft 之前】记下这条任务原来的排期锚点（s/e/m）。
+    // 用途见函数末的"只在日期真的变了才级联"—— 协作者只是打开抽屉点保存（一个日期没改）
+    // 时绝不能跑级联：collectAffected 的断链判定在 BFS 遍历时就把下游他人任务钉成 manual，
+    // 而服务端 v_moved 只认 s/e/m 有变化 → 钉住被 42501 拒 → save_plan 整体失败 + 回滚。
+    const before = { s: raw.s, e: raw.e, m: raw.m };
     // 类型判定：draft 未显式带 type 时（如"新建后补写依赖"这类局部更新）必须沿用任务原始类型。
     // 否则里程碑会被当成"转成普通任务"处理 → delete raw.m 降级成任务，且 res 未初始化，
     // 后续 recomputeAffected 读 t.res.forEach 直接抛 TypeError。
@@ -199,11 +220,24 @@ export function createMutations(ctx) {
       }
     }
 
-    // 4. 重建索引并级联重排本任务及其后置子图
-    //    collectAffected 是"唯一入口"：协作者模式内部自动断链并返回 pinned，这里只取 affected
+    // 4. 重建索引
+    //    collect() 只回写 id/mod/isMs/manual/res，**不碰 s/e/m**，所以比较点放在它之后是安全的：
+    //    此时索引里登记的已是同一个 raw 对象（引用不变），且 draft 的全部日期写入都已生效。
     ctx.collect();
-    ctx.recomputeAffected(ctx.collectAffected(taskId).affected);
+    // 【比较点 ②：级联之前】只有排期锚点真的变了才级联重排后置子图。
+    //   没变（协作者打开抽屉点保存、只改名字/进度/依赖但日期没动）→ 不跑级联 → 不钉人 → 保存必然通过；
+    //   变了 → 跑级联，钉住有依据（服务端 v_moved 非空，特许①成立）。
+    //   只改 dep 而不改日期时不跑是刻意的：本任务没有移动，就没有东西需要传播给它下游
+    //   （若强行跑，会在自己日期没变的情况下钉住下游 → 正好触发上面那条 42501）。
+    const moved = raw.s !== before.s || raw.e !== before.e || raw.m !== before.m;
+    if (!moved) {
+      ctx.save();
+      return { pinned: [] };
+    }
+    const { affected, pinned } = ctx.collectAffected(taskId);
+    ctx.recomputeAffected(affected);
     ctx.save();
+    return { pinned };
   }
 
   // 里程碑：拖拽落位（仅调整上线日期 m）
@@ -528,7 +562,11 @@ export function createMutations(ctx) {
           // 先钉再 collect：补建的上线里程碑要先进索引，collectAffected 才认得出它的后置
           const msId = pinModToDate(mo, v.date);
           ctx.collect();
-          ctx.recomputeAffected(ctx.collectAffected(msId).affected);
+          // 这里是协作者**够得到**的钉住路径（字段级放行、需求归属不限）：
+          // 上线日一动，下游他人任务会被断链钉成手动 → 必须交回界面提示（见 pushPinned）
+          const r = ctx.collectAffected(msId);
+          ctx.recomputeAffected(r.affected);
+          pushPinned(r.pinned);
         }
       }
     }

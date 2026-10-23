@@ -11,6 +11,7 @@
 // ============================================================
 import { buildTaskMenuItems, buildModuleMenuItems, buildResMenuItems, openContextMenu, dateAtClientX } from './context-menu.js';
 import { openNewTaskDrawer, openTaskDrawer } from './task-drawer.js';
+import { notifyPinned } from '../utils/pinned.js';
 import { isModCollapsed, toggleModCollapsed } from '../core/mod-fold.js';
 import { scrollToModStart } from './gantt-scroll.js';
 
@@ -53,13 +54,15 @@ function dispatchTaskMenu(key, taskId, deps, atDate) {
   } else if (key === 'complete') {
     const done = (t.done || 0) >= 100 ? 0 : 100;
     // 显式带 type：避免 saveTask 把里程碑误转成普通任务
-    deps.sched.saveTask(taskId, { type: t.isMs ? 'ms' : 'task', done });
+    // saveTask 只在日期变化时级联（改了完成度不会级联），这里仍走统一提示以防未来改动失守
+    const r = deps.sched.saveTask(taskId, { type: t.isMs ? 'ms' : 'task', done });
     deps.render();
-    deps.toast(done === 100 ? '已标记完成' : '已重置进度');
+    notifyPinned(deps, r, done === 100 ? '已标记完成' : '已重置进度');
   } else if (key === 'toggleManual') {
-    deps.sched.saveTask(taskId, { type: t.isMs ? 'ms' : 'task', manual: !t.manual });
+    // 切手动/自动可能让本任务被重排 → 协作者会因此钉住下游他人任务，必须说出来
+    const r = deps.sched.saveTask(taskId, { type: t.isMs ? 'ms' : 'task', manual: !t.manual });
     deps.render();
-    deps.toast(t.manual ? '已切换为自动计划' : '已切换为手动计划');
+    notifyPinned(deps, r, t.manual ? '已切换为自动计划' : '已切换为手动计划');
   } else if (key === 'delete') {
     const name = deps.sched.nameOf(t);
     if (!confirm(`确认删除${t.isMs ? '里程碑' : '任务'}「${name}」？此操作不可撤销。`)) return;

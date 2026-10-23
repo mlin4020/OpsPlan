@@ -20,6 +20,7 @@ import { milestoneName } from '../core/mod-tag.js';
 import { isOverdueTask } from '../core/task-status.js';
 import { closeDrawer, getPanel, onDrawerClose, setPanel } from './drawer-shell.js';
 import { openProblemDrawer, renderProbList, updateProblemBadge } from './problem-drawer.js';
+import { mergePinned, notifyPinned } from '../utils/pinned.js';
 
 let draftIsMs = false;          // 当前抽屉选择的类型：true=里程碑
 let modalDeps = [];             // 依赖草稿 [{id, lag}]
@@ -412,11 +413,14 @@ function bindTaskDrawerControls(deps) {
       } catch (err) { deps.toast(err.message); return; }
       // addTask 不接收 dep：新建后补写前置依赖。
       // 必须显式带 type：否则 saveTask 会把新建的里程碑误判为"转成普通任务"（删除 m 且 res 未初始化）
-      if (modalDeps.length) deps.sched.saveTask(newId, { type: draftIsMs ? 'ms' : 'task', dep: modalDeps.map(d => ({ ...d })) });
+      // 保存可能级联（日期变了才会），协作者因此可能钉住下游他人任务 → 用统一提示说出来
+      const depResult = modalDeps.length
+        ? deps.sched.saveTask(newId, { type: draftIsMs ? 'ms' : 'task', dep: modalDeps.map(d => ({ ...d })) })
+        : null;
       newTaskMode = null;
       closeDrawer(deps);
       deps.render();
-      deps.toast(draftIsMs ? '已新增里程碑' : '已新增任务');
+      notifyPinned(deps, depResult, draftIsMs ? '已新增里程碑' : '已新增任务');
       return;
     }
 
@@ -438,11 +442,13 @@ function bindTaskDrawerControls(deps) {
       mod,   // 归属变更：改需求（跨需求移动）/ 阶段
       p
     };
-    deps.sched.saveTask(curTaskId(deps), draft);
+    // 抽屉保存：日期没变时 saveTask 不跑级联（不会钉人）；日期真的变了才可能钉住下游他人任务，
+    // 那种情况必须提示，不能只说"已保存"（否则"我碰了别人的任务"在界面上完全不可见）
+    const saved = deps.sched.saveTask(curTaskId(deps), draft);
     closeDrawer(deps);
     deps.render();
     const moved = mod && t.mod && mod !== t.mod;
-    deps.toast(moved ? `已保存并移动到「${mod}」` : '已保存');
+    notifyPinned(deps, saved, moved ? `已保存并移动到「${mod}」` : '已保存');
   });
 
   // 任务抽屉内「管理资源」快捷入口（源 gantt-app.js btnDrawerResLib）
@@ -522,8 +528,9 @@ function bindTaskDrawerControls(deps) {
   on('drawerMask', () => closeDrawer(deps));
   on('btnAutoFixAll', () => {
     const ids = [...new Set(deps.sched.problems().map(p => p.taskId))];
-    ids.forEach(id => deps.sched.resolveAuto(id));
-    deps.toast(`已自动调整 ${ids.length} 项问题`);
+    // 逐条收集：resolveAuto 在协作者模式下会钉住下游他人任务，批量处理时也要合并提示
+    const results = ids.map(id => deps.sched.resolveAuto(id));
+    notifyPinned(deps, mergePinned(results), `已自动调整 ${ids.length} 项问题`);
     renderProbList(deps);
     updateProblemBadge(deps);
     deps.render();
@@ -539,8 +546,8 @@ function bindTaskDrawerControls(deps) {
       const id = btn.dataset.taskId;
       if (!id) return;
       if (btn.classList.contains('iss-auto')) {
-        deps.sched.resolveAuto(id);
-        deps.toast('已自动调整排期');
+        // 自动调整会把本任务解锁重排 → 协作者可能钉住下游他人任务；钉住时以钉住提示为准
+        notifyPinned(deps, deps.sched.resolveAuto(id), '已自动调整排期');
       } else if (btn.classList.contains('iss-ignore')) {
         deps.sched.resolveIgnore(id);
         deps.toast('已忽略该问题');

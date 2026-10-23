@@ -1330,3 +1330,103 @@ describe('scheduler: 级联断链', () => {
     expect(sched.getTask('B').manual).toBe(true);
   });
 });
+
+// ============================================================
+// 修复轮（Task 9）：saveTask 只在"日期真的变了"时才级联
+//
+// 为什么必须这样（线上故障级）：collectAffectedCapped/collectAffected 的断链判定在
+// **BFS 遍历时**就把"不可编辑的下游节点"钉成 manual —— 不管它会不会动。而抽屉保存会把
+// 整份 draft 原样回传（start/dur/manual/dep 全带上）。于是协作者"打开抽屉、什么都不改、
+// 点保存"也会把下游他人任务钉成手动；服务端 assert_plan_editable 的 v_moved 只认
+// s/e/m 有变化 → 本次提交"动了别人的任务"却没有任何日期变化 → 钉住被 42501 拒 →
+// save_plan 整体失败 + 回滚。结论：只要下游有别人的任务，协作者连保存都做不了。
+//
+// 判据因此落在"锚点自己的 s/e/m 变没变"上：
+//   没变 → 不跑级联 → 不钉人 → 保存必然通过
+//   变了 → 跑级联 → 钉住有依据 → 服务端 v_moved 非空 → 特许①成立
+// 两条用例必须能**区分**：下面第一条在"无条件级联"的实现下会红（pinned=['B']、
+// B.manual 被改成 true），第二条在"改了日期也不级联"的实现下会红。
+// ============================================================
+describe('scheduler: saveTask 只在日期变化时级联（修复轮）', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+
+  // 建链必须在切身份之前：addTask 的守卫按"打算派给谁"判，协作者建不了 res:['李四'] 的任务
+  function chain() {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    // B 必须自动（manual:false）：若 B 本来就是 manual，"有没有被误钉"在数据上无法区分
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    return sched;
+  }
+
+  it('协作者只保存、日期一个没改：不跑级联，下游他人任务仍是自动，pinned 为空', () => {
+    const sched = chain();
+    asCollab();
+
+    const a = sched.getTask('A');
+    // 与抽屉"原样回传"等价：日期/工作量/负责人/依赖全部照抄当前值
+    const r = sched.saveTask('A', {
+      type: 'task', res: [...a.res], dep: a.dep.map(d => ({ ...d })),
+      start: a.s, dur: a.w, manual: a.manual
+    });
+
+    expect(r && r.pinned).toEqual([]);              // ← 一个人都没钉
+    expect(sched.getTask('B').manual).toBe(false);  // ← 关键：下游他人任务没被误钉成手动
+    expect(sched.getTask('A').s).toBe('2026-09-01');
+    expect(sched.getTask('A').e).toBe('2026-09-01');
+  });
+
+  it('协作者改了日期：下游他人任务被钉住，pinned 含它（服务端 v_moved 非空，可过校验）', () => {
+    const sched = chain();
+    asCollab();
+
+    const r = sched.saveTask('A', {
+      type: 'task', res: ['张三'], dep: [], start: '2026-09-21', dur: 1, manual: true
+    });
+
+    expect(r.pinned).toEqual(['B']);                // ← 钉住有依据（A 的 s 变了）
+    expect(sched.getTask('B').manual).toBe(true);
+    expect(sched.getTask('A').s).toBe('2026-09-21');
+  });
+
+  it('pinned 只计"真的从自动改成手动"的节点：本来就 manual 的下游不算虚数', () => {
+    const sched = makeSched();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    // B 用 addTask 默认的 manual:true —— 它本来就是手动，"被钉住"这件事无从谈起
+    sched.addTask({ mod: '官网改版', p: 'sit', start: '2026-09-02', dur: 1, res: ['李四'], id: 'B' });
+    sched.saveTask('B', { dep: [{ id: 'A', lag: 0 }] });
+    asCollab();
+
+    const r = sched.saveTask('A', {
+      type: 'task', res: ['张三'], dep: [], start: '2026-09-21', dur: 1, manual: true
+    });
+
+    expect(r.pinned).toEqual([]);                   // 提示里的"N 条"不该含虚数
+    expect(sched.getTask('B').manual).toBe(true);   // 断链依旧成立（B 没被重排）
+  });
+
+  // 第三条会钉人的路径：需求从「待排期」改成「已排期」时补钉上线日（updateModule）。
+  // updateModule 的返回值是需求对象（不能塞 pinned），所以钉住结果经 sched.takePinned() 交回界面。
+  // 没有这条用例，pushPinned 是否真的接上、takePinned 是否真能取到，全靠读代码猜。
+  it('需求补钉上线日（待排期→已排期）：钉住的他人任务经 takePinned 交回界面', () => {
+    const sched = makeSched();
+    sched.addModule({ name: '我的需求', autoCreate: false });
+    sched.addTask({ mod: '我的需求', p: 'dev', start: '2026-09-01', dur: 1, res: ['张三'], id: 'A' });
+    sched.addTask({ mod: '我的需求', p: 'go', type: 'ms', start: '2026-09-10', id: 'MS' });
+    // 上线里程碑的下游是别人的自动任务：钉上线日 → 级联一碰它就断链
+    sched.addTask({ mod: '我的需求', p: 'sit', start: '2026-09-11', dur: 1, res: ['李四'], id: 'B', manual: false });
+    sched.saveTask('B', { dep: [{ id: 'MS', lag: 0 }] });
+    sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['我的需求'] });
+    sched.updateModule({ name: '我的需求', unscheduled: true });
+
+    asCollab();
+    sched.updateModule({ name: '我的需求', unscheduled: false });   // ← 补钉上线日 + 级联
+
+    expect(sched.takePinned()).toEqual(['B']);      // 钉住结果没被丢掉
+    expect(sched.getTask('B').manual).toBe(true);
+    expect(sched.takePinned()).toEqual([]);         // 取走即清空（不会污染之后的操作）
+  });
+});

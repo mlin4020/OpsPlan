@@ -158,6 +158,13 @@ export function createScheduler({ planStore, userStore, W, sync }) {
     setModuleVersion: mutations.setModuleVersion,
     archiveVersionMods: mutations.archiveVersionMods,
     detectProblems: detect,
+    // 取走"暂存的钉住他人任务"（updateModule 补钉上线里程碑这类没有直接结果通道的路径）。
+    // 取走即清空，避免陈旧的 id 被之后无关的操作误报出去。
+    takePinned: () => {
+      const out = Array.isArray(ctx.pinnedOut) ? ctx.pinnedOut : [];
+      ctx.pinnedOut = [];
+      return out;
+    },
     save: (skipHistory) => persistence.save(skipHistory),
     // 只写 localStorage 兜底、不推送服务端。供 plan-sync 回滚后把服务器版本落回本地
     // （若走 save() 会再推一次 → 被拒 → 再回滚，死循环）

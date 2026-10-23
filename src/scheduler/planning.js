@@ -183,8 +183,13 @@ export function createPlanning(ctx) {
         const t = ctx.tasksById[n];
         if (!t) return;
         if (!canTouchTask(t, modByName(t.mod), c)) {
-          if (!t.manual && !dry) t.manual = true;   // 钉住；预览不写
-          if (!pinned.includes(n)) pinned.push(n);
+          // 只统计"真的从自动被改成手动"的节点：本来就是 manual 的没有"被钉住"这回事，
+          // 计入会让界面提示成"已钉住 N 条"里掺虚数（它一直都锁着，本次没有新增跨人写入）。
+          // 预览（dry）照记，但不写 manual —— 预览绝不能有副作用。
+          if (!t.manual) {
+            if (!dry) t.manual = true;
+            if (!pinned.includes(n)) pinned.push(n);
+          }
           return;                                   // 断链：不加入 affected、不继续下探
         }
         affected.add(n);

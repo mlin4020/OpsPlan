@@ -154,6 +154,9 @@ export function bindAll(rawDeps) {
     reqPage,
     themePicker,
     setSync,
+    // 轻提示（已归一化）：入口层有些"必须说出来"的状态没有别的通道，
+    // 例如账号资料加载失败导致权限降级（见 main-gantt 的档案缓存兜底）
+    toast: deps.toast,
     loading: { showLoading: () => showLoading(doc), hideLoading: () => hideLoading(doc) },
     unbindDrag,
     // 便捷：同步状态钩子（挂到 sched.onSyncStatus 或直接使用）

@@ -12,6 +12,7 @@ import { collectProposers } from '../core/mod-query.js';
 import { fmt } from '../core/dates.js';
 import { nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-color.js';
 import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority, LIFECYCLE_DEFAULT, normalizeLifecycle } from '../core/default-data.js';
+import { notifyPinned } from '../utils/pinned.js';
 
 let modEditName = null;   // 编辑模式：当前正在编辑的需求名（null=新增模式）
 
@@ -275,7 +276,11 @@ function bindModalControls(deps) {
         if (name !== modEditName) delete collapsed[modEditName];
         closeNewModModal(deps);
         deps.render();
-        deps.toast('已更新需求');
+        // 需求从「待排期」改成「已排期」时，updateModule 会把上线里程碑钉到版本日并级联，
+        // 协作者因此可能钉住下游他人任务。updateModule 返回的是需求对象（无法顺带带 pinned），
+        // 走 sched.takePinned() 取走这次写入产生的钉住 —— 有就提示，没有才说"已更新需求"。
+        const pinned = deps.sched.takePinned ? deps.sched.takePinned() : [];
+        notifyPinned(deps, pinned, '已更新需求');
       } catch (err) { deps.toast(err.message); }
     } else {
       // 新增模式

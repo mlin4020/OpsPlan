@@ -169,6 +169,33 @@ function boot() {
     ui.onSyncStatus('ok', { msg: `已补全 ${plan.length} 个历史需求的提出信息与生命周期` });
   }
 
+  // ---- 账号档案（role / resource_name）的本地兜底 ----
+  // 为什么要缓存：access 完全由 role 与 resource_name 决定（resolveAccess）。
+  // 档案接口一次瞬时失败就会让 prof 为 null → role 落到 'user'、resourceName 落到 '' →
+  // 降级为只读，管理员/协作者被**静默**变成"什么都点不动"。
+  // 旧逻辑里档案只影响"管理员徽标"，失败模式很轻；现在它决定写权限，必须兜住：
+  // 失败时沿用**上一次成功**的身份（缓存在本机，按用户 id 隔离）；
+  // 连缓存都没有才降为只读 —— 但那时必须明确告知，不能装作没发生。
+  const PROFILE_CACHE_PREFIX = 'sched-profile-';
+  function readCachedProfile(uid) {
+    try {
+      const raw = localStorage.getItem(PROFILE_CACHE_PREFIX + uid);
+      const p = raw ? JSON.parse(raw) : null;
+      return p && typeof p === 'object' ? p : null;
+    } catch (e) { return null; }
+  }
+  function cacheProfile(uid, prof) {
+    try {
+      localStorage.setItem(PROFILE_CACHE_PREFIX + uid, JSON.stringify({
+        role: prof.role || 'user',
+        resource_name: prof.resource_name || ''
+      }));
+    } catch (e) { /* 隐私模式 / 配额满：缓存只是兜底，写不进去不影响主流程 */ }
+  }
+
+  // 档案加载失败的一句话说明（null = 没失败）。在 wireUI 之后由 initProject 提示一次。
+  let profileNotice = null;
+
   // 只读状态（进入项目后由 editable 判定写入）
   let ui = null;
   function wireUI() {
@@ -239,6 +266,14 @@ function boot() {
 
     // 组装组件层（此时 userStore.readonly 已确定）
     wireUI();
+    // 档案加载失败必须说出来：access 全靠 role / resourceName，静默失败表现为
+    // "我明明能用却什么都点不动"，排查成本极高。只提示一次（项目不存在时 initProject 会被调两次）。
+    if (profileNotice) {
+      const notice = profileNotice;
+      profileNotice = null;
+      if (ui && typeof ui.toast === 'function') ui.toast(notice);
+      else if (ui) ui.onSyncStatus('fail', { msg: notice });
+    }
     hideLoading();
 
     // 初始渲染（空数据壳），随后从服务器加载
@@ -273,12 +308,26 @@ function boot() {
         // 档案里的 role 与"对应人员"必须一起注入：任务级权限全靠 resource_name，
         // 少了它协作者会被降级成只读（表现为"我明明配了人名却什么都不能改"）。
         // role 同时写进 user.role（既有代码从这里读）和顶层 role（ctxOf 从这里读），别只写一处。
-        const { data: prof } = await getProfile(user.id);
-        const role = (prof && prof.role) || 'user';
+        // ⚠️ 必须看 error：以前只解构 data，接口一次瞬时失败就把 prof 当空 → 静默全局只读。
+        const { data: prof, error: profErr } = await getProfile(user.id);
+        let role = 'user';
+        let rname = '';
+        if (profErr || !prof) {
+          const cached = readCachedProfile(user.id);
+          role = (cached && cached.role) || 'user';
+          rname = (cached && cached.resource_name) || '';
+          profileNotice = cached
+            ? '账号资料加载失败，已沿用上次的身份继续（权限不对请刷新页面）'
+            : '账号资料加载失败，已暂时降为只读（请刷新重试）';
+        } else {
+          role = prof.role || 'user';
+          rname = prof.resource_name || '';
+          cacheProfile(user.id, prof);
+        }
         userStore.set({
           user: { id: user.id, email: user.email || '', role },
           role,
-          resourceName: (prof && prof.resource_name) || ''
+          resourceName: rname
         });
       }
     }
