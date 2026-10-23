@@ -4,7 +4,14 @@
 //   openResLib/closeResLib/renderResLib/openResEdit/saveResEdit
 //   + btnResLib/btnCloseResLib/btnAddRes/btnSaveRes/btnCancelRes/resMask 事件
 // 依赖注入（deps）：sched/planStore/render/toast/getEl/（任务抽屉资源分配需 deps.renderResPicker）
+//
+// 权限：改人名会经 mutations 的 renameResourceRefs 级联重写全项目任务里的人名
+// —— 属全权动作。入口按钮 btnResLib 已在工具栏灰化，这里再补一道（防从抽屉等其它路径进入）。
 // ============================================================
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canEditResources } from '../utils/permission.js';
+
+const canEdit = () => canEditResources(ctxOf(userStore.state));
 
 let editResId = null;
 let editResOldName = '';
@@ -26,17 +33,26 @@ function closeResLib(deps) {
 function renderResLib(deps) {
   const list = deps.getEl('resLibList');
   if (!list) return;
+  // 无全权时整块操作按钮都不渲染：资源库对这个身份只剩"看有谁"
+  const editable = canEdit();
+  const acts = r => editable
+    ? `<span class="res-lib-acts">
+        <button class="res-edit-btn" data-rid="${r.id}">编辑</button>
+        <button class="res-edit-btn danger" data-del="${r.id}">删除</button>
+      </span>`
+    : '';
   list.innerHTML = (deps.planStore.state.resources || []).map(r => `
     <div class="res-lib-row">
       <span class="avatar" style="background:${r.color}">${r.name[0]}</span>
       <span class="rname">${r.name}</span><span class="rrole">${r.role || ''}</span>
-      <span class="res-lib-acts">
-        <button class="res-edit-btn" data-rid="${r.id}">编辑</button>
-        <button class="res-edit-btn danger" data-del="${r.id}">删除</button>
-      </span>
+      ${acts(r)}
     </div>`).join('');
+  // 「＋ 新增资源」也是写入口，同样的口径
+  const addBtn = deps.getEl('btnAddRes');
+  if (addBtn) addBtn.style.display = editable ? '' : 'none';
   list.querySelectorAll('[data-rid]').forEach(b => b.addEventListener('click', () => openResEdit(b.dataset.rid, deps)));
   list.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+    if (!canEdit()) return;
     const r = (deps.planStore.state.resources || []).find(x => x.id === b.dataset.del);
     if (!r) return;
     if (!confirm(`确认删除资源「${r.name}」？其参与的所有任务将取消该资源分配。`)) return;
@@ -47,6 +63,7 @@ function renderResLib(deps) {
 }
 
 function openResEdit(id, deps) {
+  if (!canEdit()) return;
   editResId = id || null;
   const r = id ? (deps.planStore.state.resources || []).find(x => x.id === id) : null;
   editResOldName = r ? r.name : '';
@@ -59,6 +76,7 @@ function openResEdit(id, deps) {
 }
 
 function saveResEdit(deps) {
+  if (!canEdit()) { deps.toast('无权修改资源库'); return; }
   const name = deps.getEl('inpResName').value.trim();
   if (!name) { deps.toast('名称不能为空'); return; }
   const role = deps.getEl('inpResRole').value.trim();

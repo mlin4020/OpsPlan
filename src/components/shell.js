@@ -348,6 +348,13 @@ ${mobileSheetHTML()}
       <input type="text" id="newModProposedBy" list="modProposerList">
       <datalist id="modProposerList"></datalist>
     </div>
+    <!-- 归属（谁对这个需求有全部权限）：归属级字段，只有需求创建人 / 项目所属人 / 管理员能改。
+         留空 = 无主 —— 无主需求只有全权用户能改名/删除/归档/转交。 -->
+    <div class="f-row">
+      <label>归属<span class="phase-tip">谁对这个需求有全部权限（改名 / 删除 / 归档 / 转交）</span></label>
+      <input type="text" id="inpModOwner" list="modOwnerList" placeholder="留空 = 无主，仅项目所属人与管理员可管理">
+      <datalist id="modOwnerList"></datalist>
+    </div>
     <!-- 提出时间：整块（文字 + 图标）都可点，点哪儿都弹日期选择器。
          原生 date 只有右侧那枚 small 图标能唤起 picker，中间的文字区点了没反应 ——
          这是这一栏最常见的"点了没反应"投诉。showPicker() 由 JS 代理（见 modals.js）。 -->

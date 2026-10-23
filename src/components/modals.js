@@ -13,6 +13,8 @@ import { fmt } from '../core/dates.js';
 import { nextModuleColor, resolveModuleColors, resolveChosenColor } from '../core/mod-color.js';
 import { MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normalizePriority, LIFECYCLE_DEFAULT, normalizeLifecycle } from '../core/default-data.js';
 import { notifyPinned } from '../utils/pinned.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canManageModule, canEditModuleFields } from '../utils/permission.js';
 
 let modEditName = null;   // 编辑模式：当前正在编辑的需求名（null=新增模式）
 
@@ -88,6 +90,11 @@ function openNewModModal(deps) {
   renderProposerOptions(deps);                       // 新建也要能选已有提出人
   renderModLcSeg(LIFECYCLE_DEFAULT, deps);           // 新建默认「待分析」
   g('btnNewModSave').textContent = '创建';
+  // 归属默认 = 当前用户对应的人名（没配人名 = 留空 = 无主，不臆造归属）
+  fillOwnerOptions(deps.planStore.state.modules, deps);
+  const ownerEl = g('inpModOwner');
+  if (ownerEl) ownerEl.value = userStore.state.resourceName || '';
+  applyModFormPermission(null, deps);
   const delBtn = g('btnDelMod'); if (delBtn) delBtn.style.display = 'none';
   const phaseRow = g('rowNewModPhases'); if (phaseRow) phaseRow.style.display = '';
   renderPhaseChecks(deps, true);
@@ -121,7 +128,17 @@ function openEditModModal(modName, deps) {
   // 回显实际值：老数据没有 lifecycle 时选中「未设置」，保存后仍是未设置
   renderModLcSeg(mo.lifecycle, deps);
   g('btnNewModSave').textContent = '保存';
-  const delBtn = g('btnDelMod'); if (delBtn) { delBtn.style.display = ''; delBtn.dataset.modName = modName; }
+  // 归属：候选 + 回显 + 按权限置灰（置灰时保存不提交 owner，否则会试图转交而被服务端拒）
+  fillOwnerOptions(deps.planStore.state.modules, deps);
+  const ownerEl = g('inpModOwner');
+  if (ownerEl) ownerEl.value = mo.owner || '';
+  applyModFormPermission(mo, deps);
+  // 删除需求与改名同一权限（归属级）：无权时不给按钮，别让用户点出一个"无权删除"的 toast
+  const delBtn = g('btnDelMod');
+  if (delBtn) {
+    delBtn.style.display = canManageModule(mo, ctxOf(userStore.state)) ? '' : 'none';
+    delBtn.dataset.modName = modName;
+  }
   const phaseRow = g('rowNewModPhases'); if (phaseRow) phaseRow.style.display = 'none';  // 阶段选择仅用于新建
   g('modNewMask').classList.add('show');
   g('modNewDrawer').classList.add('open');
@@ -181,6 +198,42 @@ function renderProposerOptions(deps) {
   if (!list) return;
   list.innerHTML = collectProposers(deps.planStore.state.modules)
     .map(n => `<option value="${escAttr(n)}"></option>`).join('');
+}
+
+// 归属候选：数据里出现过的人名（需求的归属人 + 任务上的资源）。
+// 为什么给 datalist：拼错的后果不是"填错一个标签"，而是这个需求从此归属到一个
+// 不存在的人 —— 创建人也改不了它的名字/归属了。候选限定在已知人名内能挡住绝大多数手滑。
+function fillOwnerOptions(mods, deps) {
+  const dl = deps.getEl('modOwnerList');
+  if (!dl) return;
+  const names = new Set();
+  (mods || []).forEach(m => { if (m.owner) names.add(m.owner); });
+  (mods || []).forEach(m => (m.bars || []).forEach(b => (b.res || []).forEach(r => names.add(r))));
+  dl.innerHTML = [...names].sort().map(n => `<option value="${escAttr(n)}"></option>`).join('');
+}
+
+// 读取归属输入框（'' = 无主）
+function readModOwner(deps) {
+  const el = deps.getEl('inpModOwner');
+  return el ? String(el.value || '').trim() : '';
+}
+
+// 归属 / 名字的可改性 + 只读身份的整体可写性。
+// 名字与归属同权：服务端 diff 里"改名"与"删旧增新"同形，靠 bars 深度相等识别，
+// 前端提前置灰，避免"填了却存不进"。
+function applyModFormPermission(mo, deps) {
+  const c = ctxOf(userStore.state);
+  const canFields = canEditModuleFields(c);
+  const ownerEl = deps.getEl('inpModOwner');
+  const nameEl = deps.getEl('newModName');
+  const canOwn = mo ? canManageModule(mo, c) : canFields;
+  if (ownerEl) ownerEl.disabled = !canOwn;
+  if (nameEl) {
+    nameEl.disabled = !canOwn;
+    nameEl.title = nameEl.disabled && mo ? '该需求不是你创建的，无权改名（改名与删除同一权限）' : '';
+  }
+  const saveBtn = deps.getEl('btnNewModSave');
+  if (saveBtn) saveBtn.disabled = !canFields;
 }
 
 // 读取当前选中的排期状态
@@ -267,8 +320,13 @@ function bindModalControls(deps) {
         deps.toast('需求已存在：' + name); return;
       }
       try {
+        // 归属：置灰时**不传**。传了（哪怕是原值）就成了一次转交请求，
+        // 服务端按「无权转交」拒掉整次保存 —— 用户看到的是"我什么都没改却存不进去"。
+        // 用条件展开而不是事后 opts.owner=...：保持"字段都在同一个字面量里"的可读性
+        const ownerEl = g('inpModOwner');
+        const ownerOpt = (ownerEl && !ownerEl.disabled) ? { owner: readModOwner(deps) } : {};
         // tagc 落「实际生效色」：与去重逻辑、后续弹窗回显保持同一口径
-        deps.sched.updateModule({ oldName: modEditName, name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
+        deps.sched.updateModule({ oldName: modEditName, name, ...ownerOpt, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, modEditName), unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
         // 折叠态跟着改名走。口径见 core/mod-fold.js：只有显式 false 表示展开，
         // 原样搬运 undefined（折叠）与 true（折叠）都仍然折叠，不会因改名意外弹开
         const collapsed = deps.viewState.collapsed;
@@ -287,7 +345,7 @@ function bindModalControls(deps) {
       if (deps.planStore.state.modules.some(m => m.name === name)) { deps.toast('需求已存在：' + name); return; }
       const phases = selectedPhases(deps);
       if (phases === null) { deps.toast('请至少选择一个要初始化的阶段'); return; }
-      deps.sched.addModule({ name, tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
+      deps.sched.addModule({ name, owner: readModOwner(deps), tag: g('newModTag').value.trim(), tagc: resolveChosenColor(g('newModTagc').value, deps.planStore.state.modules, null), phases, unscheduled: readModSched(deps), pri: readModPri(deps), proposedBy: g('newModProposedBy').value, proposedAt: g('newModProposedAt').value, lifecycle: readModLc(deps), desc: g('newModDesc').value, docUrl: doc.value });
       closeNewModModal(deps);
       // 刚建的需求显式展开（缺省是折叠）：用户下一步就是给它加任务，
       // 折着的话还得再点一下才能看到自己刚建出来的阶段

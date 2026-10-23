@@ -6,6 +6,7 @@
 // 渲染层一直是对的，坏掉的是委托分支的先后顺序。
 import { describe, it, expect, beforeEach } from 'vitest';
 import { bindReqPage } from '../src/components/req-page.js';
+import { userStore } from '../src/store/user-store.js';
 
 // 假 event.target：closest(sel) 命中时返回桩对象（处理器只读 dataset 与 value）。
 // props 用于补 value —— 行内编辑靠它取值。
@@ -20,6 +21,7 @@ function makeEnv(opts) {
     gantt: { addEventListener: (type, fn) => { handlers[type] = fn; } },
     viewState: {},
     isReadonly: () => !!(opts && opts.readonly),
+    planStore: opts && opts.planStore,
     render: () => calls.push(['render']),
     toast: m => calls.push(['toast', m]),
     toggleReqExpanded: n => calls.push(['expand', n]),
@@ -268,3 +270,63 @@ describe('components/req-page: 台账拖动排序', () => {
     expect(env.calls.some(c => c[0] === 'moveModule')).toBe(false);
   });
 });
+
+// ============================================================
+// Task 12：台账行操作的归属口径
+//   按钮在视图层已按归属不渲染（见 tests/views.test.js）；这里锁委托层：
+//   即使拿到一个"本该被藏起来的"按钮（旧 DOM 残留 / 键盘路径），也不能写。
+//   但字段级行内编辑（生命周期 / 提出人 / 所属版本）对协作者必须仍然可用。
+// ============================================================
+describe('components/req-page: 归档/删除按归属拦截（Task 12）', () => {
+  const planStoreOf = owner => ({
+    state: { modules: [{ name: '重点县域', owner, bars: [] }] }
+  });
+  const withCollab = (env) => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    return env;
+  };
+
+  beforeEach(() => { userStore.reset(); });
+
+  it('协作者点别人的需求的「归档」：不调 archiveModule', () => {
+    const env = withCollab(makeEnv({ planStore: planStoreOf('李四') }));
+    env.click(fakeTarget({
+      '[data-req-archive]': { name: '重点县域', archived: '0' },
+      '[data-req-row]': { reqRow: '重点县域' }
+    }));
+    expect(env.calls.some(c => c[0] === 'archive')).toBe(false);
+  });
+
+  it('协作者点无主需求的「删除」：不调 deleteModule', () => {
+    const env = withCollab(makeEnv({ planStore: planStoreOf(undefined) }));
+    const orig = globalThis.confirm;
+    globalThis.confirm = () => true;
+    try {
+      env.click(fakeTarget({
+        '[data-req-del]': { name: '重点县域' },
+        '[data-req-row]': { reqRow: '重点县域' }
+      }));
+      expect(env.calls.some(c => c[0] === 'delete')).toBe(false);
+    } finally { globalThis.confirm = orig; }
+  });
+
+  it('协作者点自己需求的「归档」：放行', () => {
+    const env = withCollab(makeEnv({ planStore: planStoreOf('张三') }));
+    env.click(fakeTarget({
+      '[data-req-archive]': { name: '重点县域', archived: '0' },
+      '[data-req-row]': { reqRow: '重点县域' }
+    }));
+    expect(env.calls).toContainEqual(['archive', '重点县域', true]);
+  });
+
+  it('字段级行内编辑（生命周期）对协作者仍然可用 —— 不被归属判定误伤', () => {
+    const env = withCollab(makeEnv({ planStore: planStoreOf('李四') }));
+    env.change(fakeTarget({
+      '[data-req-inline]': { reqInline: 'lifecycle', name: '重点县域', prev: '待确认' },
+      '[data-req-row]': { reqRow: '重点县域' }
+    }, { value: '已确认' }));
+    expect(env.calls).toContainEqual(['update', { oldName: '重点县域', lifecycle: '已确认' }]);
+  });
+});
+
+

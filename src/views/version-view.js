@@ -20,6 +20,8 @@ import { moduleTag } from '../core/mod-tag.js';
 import { versionMembers, versionStatus, versionProgress, versionRange, sortVersions, versionOptionLabel } from '../core/versions.js';
 import { modStats } from './mod-card.js';
 import { priorityBadge } from './badge.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canDeleteVersion, canArchiveVersionMods } from '../utils/permission.js';
 
 const verExpanded = new Set();
 
@@ -99,6 +101,10 @@ function versionCard(v, ctx) {
   const rng = versionRange(v, state);
   const open = verExpanded.has(v.id);
   const actual = actualDiffText(v);
+  // 两个"全权动作"按钮：删版本会一次性解绑里面所有需求（影响面比删单个需求大）；
+  // 一键归档会批量改成员需求的 archived（归属级字段）。其余版本操作对协作者保持放开。
+  const c = ctxOf(userStore.state);
+  const showDanger = canDeleteVersion(c) && canArchiveVersionMods(c);
 
   // 头行：不展开也能一眼看到"这个版本什么时候上、做完没有"。
   //
@@ -132,9 +138,9 @@ function versionCard(v, ctx) {
         : '<div class="ver-mod-empty">还没有需求 · 点右下角「＋ 加需求」把要一起上线的需求放进来</div>'}
       <div class="ver-foot">
         <button type="button" class="btn primary ver-act" data-ver-add="${v.id}">＋ 加需求</button>
-        ${v.shipped ? `<button type="button" class="btn ghost ver-act" data-ver-archive="${v.id}" title="把本版本的全部需求标记为已归档（不自动执行，避免误收口）">归档本版本全部需求</button>` : ''}
+        ${v.shipped && showDanger ? `<button type="button" class="btn ghost ver-act" data-ver-archive="${v.id}" title="把本版本的全部需求标记为已归档（不自动执行，避免误收口）">归档本版本全部需求</button>` : ''}
         <span class="ver-spacer"></span>
-        <button type="button" class="btn danger ver-act" data-ver-del="${v.id}" title="删除版本（成员的上线日恢复为跟随任务自动计算）">删除版本</button>
+        ${showDanger ? `<button type="button" class="btn danger ver-act" data-ver-del="${v.id}" title="删除版本（成员的上线日恢复为跟随任务自动计算）">删除版本</button>` : ''}
       </div>
     </div>`;
 

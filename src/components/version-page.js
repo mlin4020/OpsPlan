@@ -12,6 +12,8 @@
 // ============================================================
 import { fmt } from '../core/dates.js';
 import { isReadonly } from '../utils/readonly.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canDeleteVersion, canArchiveVersionMods } from '../utils/permission.js';
 import { findVersion, versionOfMap, versionMembers, versionStatus } from '../core/versions.js';
 import { toggleVersionExpanded, isVersionExpanded, setVersionPage, versionPageOf } from '../views/version-view.js';
 
@@ -165,6 +167,9 @@ export function bindVersionPage(deps) {
     }
 
     if (d.verArchive != null) {
+      // 批量归档会改成员需求的 archived（归属级字段）→ 全权动作。
+      // 按钮已按权限不渲染，这里是第二道（防其它路径 / 旧 DOM 残留）
+      if (!canArchiveVersionMods(ctxOf(userStore.state))) return;
       const state = deps.planStore.state;
       const v = findVersion(state, d.verArchive);
       if (!v) return;
@@ -178,6 +183,7 @@ export function bindVersionPage(deps) {
     }
 
     if (d.verDel != null) {
+      if (!canDeleteVersion(ctxOf(userStore.state))) return;
       const v = findVersion(deps.planStore.state, d.verDel);
       if (!v) return;
       if (!confirm(`删除版本「${v.name}」？\n成员需求本身不会被删除，它们的「上线」日期恢复为跟随任务自动计算。`)) return;

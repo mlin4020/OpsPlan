@@ -1,5 +1,5 @@
 // 渲染视图层测试：锁定 barHtml/bands/msLabel/renderHeader 模板输出，防止渲染回归
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { F } from '../src/core/dates.js';
 import { defaultModules, defaultResources, defaultHolidays } from '../src/core/default-data.js';
 import { PCOL } from '../src/core/default-data.js';
@@ -11,6 +11,7 @@ import { renderAll, nonWorkdayBg, weekendOnly } from '../src/views/index.js';
 import { renderReportView } from '../src/views/report-view.js';
 import { renderModDetailRows, renderModCard } from '../src/views/mod-card.js';
 import { renderReqView, toggleReqExpanded, shipInfo } from '../src/views/req-view.js';
+import { userStore } from '../src/store/user-store.js';
 
 // 构造最小渲染 ctx（与 renderAll 的 buildViewCtx 契约对齐）
 function makeCtx() {
@@ -751,6 +752,61 @@ describe('views: 需求台账主行表格', () => {
     expect(arch).not.toContain('延后');                             // 但不再提示延后
     expect(arch).not.toContain('req-devi');
     expect(arch).toContain('<i class="archived"');                  // 进度条转中性色
+  });
+});
+
+// ============================================================
+// Task 12：台账的归档 / 删除按钮按需求归属显隐
+//   分界线不是"只读与否"（协作者不是只读），而是"这条需求归不归我"。
+//   行内字段编辑（生命周期 / 提出人 / 所属版本）走字段级口径，保持放开。
+// ============================================================
+describe('views: 台账归档/删除按需求归属显隐（Task 12）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const renderWith = (mods, user) => {
+    const ctx = makeReqCtx();
+    ctx.state.modules = mods;
+    userStore.set({ readonly: false, ...user });
+    return renderReqView(null, ctx);
+  };
+
+  it('协作者：只有自己创建的需求带归档/删除，别人的与无主的都不带', () => {
+    const html = renderWith([
+      { name: '我的需求', owner: '张三', bars: [], pri: 'P1' },
+      { name: '别人的需求', owner: '李四', bars: [], pri: 'P1' },
+      { name: '无主需求', bars: [], pri: 'P1' }
+    ], { access: 'collab', resourceName: '张三', role: 'user' });
+
+    expect(html).toContain('data-req-del="我的需求"');
+    expect(html).toContain('data-req-archive="我的需求"');
+    expect(html).not.toContain('data-req-del="别人的需求"');
+    expect(html).not.toContain('data-req-archive="别人的需求"');
+    // 无主需求 ≠ 可认领：归属级动作只给全权
+    expect(html).not.toContain('data-req-del="无主需求"');
+    // 编辑按钮始终在：字段级编辑对协作者放开（弹窗里再按归属置灰名字/归属）
+    expect(html).toContain('data-req-edit="别人的需求"');
+    // 行内字段编辑也保持放开
+    expect(html).toContain('data-req-inline="lifecycle"');
+  });
+
+  it('全权用户：所有需求（含别人的与无主的）都能归档/删除', () => {
+    const html = renderWith([
+      { name: '我的需求', owner: '张三', bars: [], pri: 'P1' },
+      { name: '别人的需求', owner: '李四', bars: [], pri: 'P1' },
+      { name: '无主需求', bars: [], pri: 'P1' }
+    ], { access: 'full', resourceName: '张三', role: 'admin' });
+
+    ['我的需求', '别人的需求', '无主需求'].forEach(n => {
+      expect(html).toContain(`data-req-del="${n}"`);
+      expect(html).toContain(`data-req-archive="${n}"`);
+    });
+  });
+
+  it('只读身份：一条都不渲染（除 CSS 外还有这层显隐）', () => {
+    const html = renderWith([
+      { name: '我的需求', owner: '张三', bars: [], pri: 'P1' }
+    ], { access: 'readonly', readonly: true, resourceName: '张三' });
+    expect(html).not.toContain('data-req-del="我的需求"');
   });
 });
 

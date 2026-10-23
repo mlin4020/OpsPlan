@@ -20,6 +20,8 @@ import { versionOfMod, versionStatus, findGoMs, sortVersions, versionOptionLabel
 import { filterMods, sortMods, collectProposers, modGroupTier } from '../core/mod-query.js';
 import { modStats, renderModDetailRows } from './mod-card.js';
 import { priorityBadge, lifecycleBadge, LC_CLASS } from './badge.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canManageModule } from '../utils/permission.js';
 
 const reqExpanded = new Set();
 
@@ -196,6 +198,9 @@ function rowHtml(mo, ctx, deps, dragOn) {
   const { tag, tagc } = moduleTag(mo, today);
   const ver = versionOfMod(ctx.state, mo.name);
   const archFlag = mo.archived ? '<span class="req-badge-arch">已归档</span>' : '';
+  // 归档 / 删除是需求归属级动作：只有需求创建人 / 项目所属人 / 管理员看到按钮。
+  // 行内字段编辑（生命周期 / 提出人 / 所属版本）另有字段级口径，不在这里收。
+  const canManage = canManageModule(mo, ctxOf(userStore.state));
   // 拖拽手柄与分组档位只在「进行中优先」排序下输出（dragOn）：
   // 其余排序的档内先后由排序键决定（优先级 / 日期…），拖完会被重排回去，
   // 与其让用户白拖一次，不如干脆不给手柄（判定见 components/req-page.js 的拖拽委托）。
@@ -218,8 +223,8 @@ function rowHtml(mo, ctx, deps, dragOn) {
     <td class="req-c-gate">${gateCell(mo)}</td>
     <td class="req-ops req-act">
       <button type="button" class="ico-btn" data-req-edit="${esc(mo.name)}" title="编辑需求" aria-label="编辑需求">${ICON.edit}</button>
-      <button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? ICON.restore : ICON.archive}</button>
-      <button type="button" class="ico-btn danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}" title="删除需求" aria-label="删除需求">${ICON.del}</button>
+      ${canManage ? `<button type="button" class="ico-btn" data-req-archive="${esc(mo.name)}" data-name="${esc(mo.name)}" data-archived="${mo.archived ? '1' : '0'}" title="${mo.archived ? '取消归档' : '归档需求'}" aria-label="${mo.archived ? '取消归档' : '归档需求'}">${mo.archived ? ICON.restore : ICON.archive}</button>
+      <button type="button" class="ico-btn danger" data-req-del="${esc(mo.name)}" data-name="${esc(mo.name)}" title="删除需求" aria-label="删除需求">${ICON.del}</button>` : ''}
     </td>
   </tr>`;
 }

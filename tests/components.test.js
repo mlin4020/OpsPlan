@@ -14,6 +14,8 @@ import { isPanTarget, startBarDrag, startMsDrag } from '../src/components/drag.j
 import { renderProbList } from '../src/components/problem-drawer.js';
 import { bindReqPage } from '../src/components/req-page.js';
 import { openTaskDrawer } from '../src/components/task-drawer.js';
+import { bindModals } from '../src/components/modals.js';
+import { bindResLib } from '../src/components/reslib.js';
 import {
   READONLY_BTN_IDS, FULL_ONLY_BTN_IDS, refreshUI, leaveReadonly
 } from '../src/utils/readonly.js';
@@ -478,6 +480,143 @@ describe('components: 问题抽屉按归属显隐处理按钮（Task 11）', () 
     expect(other).toContain('任务重叠');           // 问题本身仍然显示
     expect(other).not.toContain('data-act="auto"');
     expect(other).not.toContain('data-act="ignore"');
+  });
+});
+
+// ============================================================
+// 需求弹窗：归属字段 + 名字/归属按归属级权限置灰（Task 12）
+//   关键不变量：置灰时保存**不能**传 owner —— 传了就是一次转交请求，
+//   服务端会按"无权转交"拒掉整次保存（用户看到"什么都没改却存不进去"）。
+// ============================================================
+function fakeModalDeps() {
+  const els = {};
+  const mk = () => ({
+    style: {}, value: '', textContent: '', innerHTML: '', hidden: false, disabled: false,
+    dataset: {}, _h: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    addEventListener(t, fn) { (this._h[t] = this._h[t] || []).push(fn); },
+    querySelectorAll: () => [], querySelector: () => null,
+    click() { (this._h.click || []).forEach(fn => fn({})); }
+  });
+  const deps = {
+    els,
+    getEl: id => (els[id] = els[id] || mk()),
+    planStore: { state: { modules: [{ name: '甲需求', owner: '李四', bars: [] }], resources: [] } },
+    viewState: { collapsed: {} },
+    today: () => new Date(2026, 8, 1),
+    render: () => {}, toast: () => {},
+    sched: {
+      updateModule: vi.fn(), addModule: vi.fn(), deleteModule: vi.fn(),
+      takePinned: () => []
+    },
+    drawers: {}, PNAME: { dev: '开发' }
+  };
+  return deps;
+}
+
+describe('components: 需求弹窗的归属与置灰（Task 12）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const openEdit = (owner, user) => {
+    const deps = fakeModalDeps();
+    deps.planStore.state.modules[0].owner = owner;
+    userStore.set({ readonly: false, ...user });
+    const modals = bindModals(deps);
+    modals.openEditModModal('甲需求');
+    const g = deps.getEl;
+    g('newModName').value = '甲需求';
+    g('newModTagc').value = '#3b82f6';
+    return { deps, g };
+  };
+
+  it('别人的需求：名字与归属都置灰', () => {
+    const { g } = openEdit('李四', { access: 'collab', resourceName: '张三', role: 'user' });
+    expect(g('newModName').disabled).toBe(true);
+    expect(g('inpModOwner').disabled).toBe(true);
+  });
+
+  it('自己的需求：名字与归属都可改，且回显当前归属', () => {
+    const { g } = openEdit('张三', { access: 'collab', resourceName: '张三', role: 'user' });
+    expect(g('newModName').disabled).toBe(false);
+    expect(g('inpModOwner').disabled).toBe(false);
+    expect(g('inpModOwner').value).toBe('张三');
+  });
+
+  it('置灰时保存不传 owner（只传字段级改动）', () => {
+    const { deps, g } = openEdit('李四', { access: 'collab', resourceName: '张三', role: 'user' });
+    g('inpModOwner').value = '张三';       // 即使 DOM 里被改过（旧值残留），也不该提交
+    g('btnNewModSave').click();
+    expect(deps.sched.updateModule).toHaveBeenCalledTimes(1);
+    const opts = deps.sched.updateModule.mock.calls[0][0];
+    expect('owner' in opts).toBe(false);
+  });
+
+  it('可改时保存带上 owner（转交）', () => {
+    const { deps, g } = openEdit('张三', { access: 'collab', resourceName: '张三', role: 'user' });
+    g('inpModOwner').value = '李四';
+    g('btnNewModSave').click();
+    expect(deps.sched.updateModule.mock.calls[0][0].owner).toBe('李四');
+  });
+
+  it('新建需求：归属默认填当前用户名，且可改', () => {
+    const deps = fakeModalDeps();
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    const modals = bindModals(deps);
+    modals.openNewModModal();
+    const g = deps.getEl;
+    expect(g('inpModOwner').value).toBe('张三');
+    expect(g('inpModOwner').disabled).toBe(false);
+    g('newModName').value = '新需求';
+    g('newModTagc').value = '#3b82f6';
+    // 新建要求至少勾一个初始化阶段：替身只回一个已勾选的 dev
+    g('newModPhases').querySelectorAll = sel => (sel.includes(':checked') ? [{ value: 'dev' }] : []);
+    g('btnNewModSave').click();
+    expect(deps.sched.addModule).toHaveBeenCalledTimes(1);
+    expect(deps.sched.addModule.mock.calls[0][0].owner).toBe('张三');
+  });
+});
+
+// ============================================================
+// 资源库：入口灰化之外的第二道（Task 12）
+//   改人名会级联重写全项目任务里的人名 → 全权动作。抽屉里的「管理资源」
+//   是 btnResLib 之外的另一条入口，所以弹窗内部也要按权限收敛。
+// ============================================================
+describe('components: 资源库按权限收敛（Task 12）', () => {
+  beforeEach(() => { userStore.reset(); });
+
+  const render = () => {
+    const els = {};
+    // 替身按需创建，唯一被断言的是 resLibList 的 innerHTML
+    const deps = {
+      getEl: id => (els[id] = els[id] || {
+        innerHTML: '', value: '', textContent: '', style: {}, dataset: {},
+        classList: { add() {}, remove() {}, contains: () => false },
+        addEventListener() {}, querySelectorAll: () => [], querySelector: () => null
+      }),
+      planStore: { state: { resources: [{ id: 'r1', name: '张三', role: '需求', color: '#3b82f6' }] } },
+      sched: { deleteResource() {}, addResource() {}, updateResource() {} },
+      render: () => {}, toast: () => {}
+    };
+    const lib = bindResLib(deps);
+    lib.renderResLib();
+    return { list: els.resLibList, addBtn: els.btnAddRes };
+  };
+
+  it('协作者：不渲染行内编辑/删除按钮，「＋ 新增资源」也隐藏', () => {
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    const { list, addBtn } = render();
+    expect(list.innerHTML).toContain('张三');            // 仍能看有谁
+    expect(list.innerHTML).not.toContain('data-rid');
+    expect(list.innerHTML).not.toContain('data-del');
+    expect(addBtn.style.display).toBe('none');
+  });
+
+  it('全权：渲染编辑/删除按钮与新增入口', () => {
+    userStore.set({ readonly: false, access: 'full', role: 'admin' });
+    const { list, addBtn } = render();
+    expect(list.innerHTML).toContain('data-rid="r1"');
+    expect(list.innerHTML).toContain('data-del="r1"');
+    expect(addBtn.style.display).toBe('');
   });
 });
 

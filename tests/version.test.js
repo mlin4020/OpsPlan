@@ -445,6 +445,34 @@ describe('版本页面：渲染契约', () => {
     expect(html).toContain(`<option value="${v2.id}">V2（11/30）</option>`);
   });
 
+  // Task 12：删除版本 / 一键归档是"全权动作"，协作者看不到；其余版本操作保持放开
+  it('协作者看不到「删除版本」「归档本版本全部需求」，但能「加需求 / 编辑 / 标记上线」', async () => {
+    const { renderVersionView, toggleVersionExpanded } = await import('../src/views/version-view.js');
+    const { buildViewCtx } = await import('../src/views/index.js');
+    const sched = makeSched();
+    const v = sched.createVersion({ name: 'V1', date: '2026-10-29', mods: ['官网改版'] }).version;
+    sched.shipVersion(v.id, true);   // 归档按钮只在已上线版本上出现
+    toggleVersionExpanded(v.id);
+    const view = () => renderVersionView({}, buildViewCtx({
+      state: planStore.state, sched, today: new Date(2026, 8, 21), workday: createWorkday({}), holidays: []
+    }));
+
+    userStore.set({ readonly: false, access: 'collab', resourceName: '张三', role: 'user' });
+    const collab = view();
+    expect(collab).not.toContain('data-ver-del');
+    expect(collab).not.toContain('data-ver-archive');
+    // 其余版本操作对协作者放开
+    expect(collab).toContain(`data-ver-add="${v.id}"`);
+    expect(collab).toContain(`data-ver-edit="${v.id}"`);
+    expect(collab).toContain(`data-ver-unship="${v.id}"`);
+
+    userStore.set({ readonly: false, access: 'full', resourceName: '张三', role: 'admin' });
+    const full = view();
+    toggleVersionExpanded(v.id);   // 复位，别把展开态留给后面的用例
+    expect(full).toContain(`data-ver-del="${v.id}"`);
+    expect(full).toContain(`data-ver-archive="${v.id}"`);
+  });
+
   it('没有版本时渲染空态与「新建版本」按钮', async () => {
     const { renderVersionView } = await import('../src/views/version-view.js');
     const { buildViewCtx } = await import('../src/views/index.js');

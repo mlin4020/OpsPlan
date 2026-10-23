@@ -14,6 +14,8 @@
 // 故记住光标位置，重绘后还原（与 work-filter.js 同一套处理）。
 // ============================================================
 import { defaultReqFilter, defaultReqSort } from '../core/mod-query.js';
+import { userStore } from '../store/user-store.js';
+import { ctxOf, canManageModule } from '../utils/permission.js';
 
 // 行内编辑字段的中文名（提示文案用；未列出的字段只提示「已更新」）
 // version 不在表里：它的提示要说出"调到哪个版本"，文案在 commitInline 里单独出
@@ -61,6 +63,16 @@ export function bindReqPage(deps) {
     // 展开态由视图模块持有（跨重绘保持），这里只负责切换后重绘
     if (deps.toggleReqExpanded) deps.toggleReqExpanded(name);
     deps.render();
+  };
+
+  // 需求归属级动作（归档 / 删除）的判定：按这条需求归不归我，而不是"全局只读"。
+  // 按钮本身已在视图层按同一口径不渲染；这里是第二道（旧 DOM 残留 / 其它入口）。
+  // 找不到需求时不拦：那是行已失效（改名/删除后重绘前的瞬间），交给 sched 自己的守卫。
+  const canManageMod = (name) => {
+    const mods = (deps.planStore && deps.planStore.state && deps.planStore.state.modules) || null;
+    if (!mods) return true;
+    const mo = mods.find(m => m.name === name);
+    return mo ? canManageModule(mo, ctxOf(userStore.state)) : true;
   };
 
   // 搜索框：输入即筛（实时），命中需求名与描述正文
@@ -189,6 +201,7 @@ export function bindReqPage(deps) {
     const arch = t.closest('[data-req-archive]');
     if (arch) {
       const name = arch.dataset.name;
+      if (!canManageMod(name)) return;
       const to = arch.dataset.archived === '1';
       deps.sched.archiveModule(name, !to);
       deps.render();
@@ -198,6 +211,7 @@ export function bindReqPage(deps) {
     const del = t.closest('[data-req-del]');
     if (del) {
       const name = del.dataset.name;
+      if (!canManageMod(name)) return;
       if (!confirm(`确认删除需求「${name}」及其所有任务？此操作不可撤销。`)) return;
       deps.sched.deleteModule(name);
       deps.render();
