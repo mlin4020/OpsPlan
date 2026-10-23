@@ -1239,5 +1239,27 @@ body.readonly-mode .req-act{display:none}
 /* 窄屏规则已并入文件末尾的手机主样式块（项目约定：手机规则集中一处，
    且 phoneCss() 取的是"最后一个 ≤767px 断点" —— 另起一个块会把主块挤掉） */
 
+/* ============================================================
+   资源工作视图：进度格可点击态 + 进度编辑弹层
+   不可编辑的行不加 .is-edit，光标也就不变（DOM 上还连 data-wk-prog 都没有）
+   ============================================================ */
+.rwk-prog.is-edit{cursor:pointer;border-radius:4px;transition:background .15s}
+.rwk-prog.is-edit:hover{background:var(--accent-soft)}
+.rwk-prog.is-edit:focus-visible{outline:2px solid var(--accent-ring);outline-offset:1px}
+
+/* 进度编辑弹层（移动端按钮保持 ≥40px 触摸高度） */
+.wkp{position:fixed;z-index:80;background:#fff;border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 10px 30px rgba(15,23,42,.18);padding:10px 12px;min-width:196px}
+.wkp-h{font-size:11px;font-weight:800;color:var(--muted);margin-bottom:6px}
+.wkp-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.wkp-n{width:62px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:14px;font-family:inherit}
+.wkp-presets{display:flex;gap:6px;margin-bottom:8px}
+.wkp-b{min-height:34px;min-width:34px;padding:6px 9px;font-size:12px;border:1px solid var(--line);
+  background:#fff;border-radius:7px;cursor:pointer;font-family:inherit;color:#334155}
+.wkp-b:hover{border-color:var(--accent);color:var(--accent)}
+.wkp-b.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.wkp-foot{display:flex;gap:6px;justify-content:flex-end}
+@media(max-width:640px){ .wkp-b{min-height:40px;padding:8px 12px;font-size:13px} .wkp-n{min-height:40px} }
+
 
 

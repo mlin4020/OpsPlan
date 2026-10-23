@@ -21,6 +21,7 @@ import { isReadonly, enterReadonly } from '../utils/readonly.js';
 import { PNAME as defaultPNAME } from '../core/default-data.js';
 import { bindToolbar } from './toolbar.js';
 import { bindWorkFilter } from './work-filter.js';
+import { bindWorkTask } from './work-task.js';
 import { bindVersionPage } from './version-page.js';
 import { bindReqPage } from './req-page.js';
 import { bindDrawers } from './drawers.js';
@@ -63,6 +64,9 @@ export function bindAll(rawDeps) {
   const reslib = bindResLib(deps);
   // 资源工作视图的筛选条（委托在 #gantt 上，只绑一次；导出单文件入口自行调用同一个函数）
   const workFilter = bindWorkFilter(deps);
+  // 资源工作视图的进度编辑（点击弹层）。与 workFilter 同属 work 视图，
+  // 但一个管"看哪些"、一个管"改什么"，故分开两个模块
+  const workTask = bindWorkTask(deps);
   // 版本（迭代）页面：同样把 [data-ver-*] 委托在 #gantt 上，一次绑定
   const versionPage = bindVersionPage(deps);
   // 需求台账页：把 [data-req-*] 委托在 #gantt 上，一次绑定
@@ -150,6 +154,7 @@ export function bindAll(rawDeps) {
     modals,
     reslib,
     workFilter,
+    workTask,
     versionPage,
     reqPage,
     themePicker,

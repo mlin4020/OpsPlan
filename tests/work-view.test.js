@@ -2,7 +2,7 @@
 //   1) taskStatus 的状态口径（与需求级 moduleTag / isOverdueTask 同源，不能各算一套）
 //   2) renderWorkView 的按人分组、优先级、排序、未分配 / 归档剔除 / 空态处理
 //   3) 接入契约：桌面与手机导航入口、非时间轴视图的工具栏收敛、CSS 顺序与窄屏版式
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,7 @@ import {
   normalizeWorkFilter, personScope, taskMatchesFilter
 } from '../src/core/work-filter.js';
 import { renderWorkView } from '../src/views/work-view.js';
+import { bindWorkTask } from '../src/components/work-task.js';
 import { renderAll } from '../src/views/index.js';
 import { buildShellHTML, buildViewerShellHTML } from '../src/components/shell.js';
 
@@ -485,5 +486,182 @@ describe('资源工作视图：接入契约', () => {
     expect(override).toBeGreaterThan(-1);
     expect(base).toBeLessThan(override);
     expect(override).toBeLessThan(mainPhoneStart);
+  });
+});
+
+// ============================================================
+// Task 12b：进度格的编辑标记
+//   可编辑与否由入口经 ctx.canEditProgress 注入（视图不 import userStore，
+//   导出单文件没有 userStore，不注入即自动只读）。不可编辑的行连
+//   data-wk-prog 都不渲染 —— 不留"看着能点、点了没反应"的假热区。
+// ============================================================
+describe('work-view: 进度编辑标记（Task 12b）', () => {
+  const oneMod = () => [{
+    name: '甲需求',
+    bars: [
+      { id: 't-mine', p: 'dev', s: '2026-08-17', e: '2026-08-21', w: 5, done: 0, res: ['张三'], dep: [] },
+      { id: 't-other', p: 'dev', s: '2026-08-17', e: '2026-08-21', w: 5, done: 40, res: ['李四'], dep: [] }
+    ]
+  }];
+
+  // 注意：makeCtx 的 sched.tasks 闭包引用的是它内部的 state 对象，
+  // 所以这里改 state.modules（而不是整体替换 ctx.state），两者才保持同一份数据
+  const ctxWith = canEditProgress => {
+    const ctx = makeCtx({ canEditProgress });
+    ctx.state.modules = oneMod();
+    return ctx;
+  };
+
+  it('注入 canEditProgress 时，可编辑的行带 data-wk-prog', () => {
+    const html = renderWorkView(null, ctxWith(() => true));
+    expect(html).toContain('data-wk-prog="t-mine"');
+    expect(html).toContain('data-wk-prog="t-other"');
+    expect(html).toContain('data-wk-done="40"');
+    expect(html).toContain('is-edit');
+  });
+
+  it('未注入 canEditProgress 时一行都不带（导出件安全只读）', () => {
+    expect(renderWorkView(null, ctxWith(undefined))).not.toContain('data-wk-prog');
+  });
+
+  it('canEdit 返回 false 的行不带 data-wk-prog', () => {
+    expect(renderWorkView(null, ctxWith(() => false))).not.toContain('data-wk-prog');
+  });
+
+  it('按行判定：只有 res 含我的行带（per-row，而不是整页开或关）', () => {
+    const html = renderWorkView(null, ctxWith(t => t.res.includes('张三')));
+    expect(html).toContain('data-wk-prog="t-mine"');
+    expect(html).not.toContain('data-wk-prog="t-other"');
+  });
+
+  it('pct = 0 的行仍然可点（编辑标记与进度条填充宽无关）', () => {
+    // 填充宽 0 时没有可命中的子元素 —— 命中区必须落在整格上，否则这条永远点不着
+    const html = renderWorkView(null, ctxWith(() => true));
+    expect(html).toContain('data-wk-prog="t-mine"');
+    expect(html).toContain('data-wk-done="0"');
+    expect(html).toMatch(/data-wk-done="0"[^>]*role="button"/);
+  });
+
+  // 入口注入的 canEditProgress 在 boot() 闭包里，node 里跑不到（要起整个 app）。
+  // 这里用源契约钉住三条最容易反向改错的规则 —— 它们是"本页只读"策略的全部内容：
+  //   ① collab 只看 res 含我（不能放宽成"有人名就能改"）
+  //   ② 未分配（res:[]）在本页只读（不能借用 canEditTask 的"可认领"语义）
+  //   ③ 导出单文件不注入（没有 userStore，不注入即自动只读）
+  it('入口注入口径与导出件不注入（源契约）', () => {
+    expect(ganttSrc).toContain('canEditProgress');
+    expect(ganttSrc).toMatch(/t\.res\.includes\(c\.rname\)/);
+    expect(ganttSrc).toMatch(/if \(c\.access !== 'collab'\) return false;/);
+    expect(standaloneSrc).not.toContain('canEditProgress');
+    // 视图必须经 ctx 注入，不能自己 import userStore（否则导出件也能拿到写入口径）
+    const workViewSrc = readFileSync(resolve(ROOT, 'src/views/work-view.js'), 'utf8');
+    expect(workViewSrc).not.toContain('user-store');
+    expect(workViewSrc).not.toContain('permission.js');
+  });
+});
+
+// ============================================================
+// Task 12b：弹层交互（bindWorkTask）
+//   用最小 DOM 替身驱动真实事件路径：点格子 → 弹层预填 → 保存提交。
+//   这里不引 jsdom：本模块只用到 createElement / querySelector / dataset / style。
+// ============================================================
+function fakeWorkTaskDom() {
+  const handlers = {};
+  const gantt = { addEventListener: (t, fn) => { (handlers[t] = handlers[t] || []).push(fn); } };
+  const btn = dataset => ({
+    dataset, _h: {},
+    addEventListener(t, fn) { this._h[t] = fn; },
+    click() { if (this._h.click) this._h.click(); }
+  });
+  const input = { value: '', _h: {}, addEventListener(t, fn) { this._h[t] = fn; }, focus() {}, select() {} };
+  const ok = btn({});
+  const cancel = btn({});
+  const presets = [0, 25, 50, 75, 100].map(p => btn({ wkpSet: String(p) }));
+  const dials = [-1, 1].map(d => btn({ wkpDial: String(d) }));
+  let lastPop = null;
+  const doc = {
+    createElement() {
+      lastPop = {
+        className: '', innerHTML: '', style: {}, offsetWidth: 200, offsetHeight: 160,
+        parentNode: { removeChild() {} },
+        querySelector: sel => (sel === '.wkp-n' ? input : (sel === '[data-wkp-ok]' ? ok : cancel)),
+        querySelectorAll: sel => (sel === '[data-wkp-set]' ? presets : dials)
+      };
+      return lastPop;
+    },
+    body: { appendChild() {} },
+    documentElement: { clientWidth: 1024, clientHeight: 768 }
+  };
+  return { handlers, doc, gantt, input, ok, cancel, presets, dials, get pop() { return lastPop; } };
+}
+
+describe('work-task: 点击进度格改完成度（Task 12b）', () => {
+  const setup = (ret) => {
+    const dom = fakeWorkTaskDom();
+    const sched = { setProgress: vi.fn(() => ret) };
+    const deps = { gantt: dom.gantt, doc: dom.doc, sched, render: vi.fn(), onSyncStatus: vi.fn() };
+    const api = bindWorkTask(deps);
+    const cell = {
+      dataset: { wkProg: 't1', wkDone: '40' },
+      getBoundingClientRect: () => ({ left: 100, bottom: 200 })
+    };
+    const clickCell = () => dom.handlers.click[0]({
+      target: { closest: sel => (sel === '[data-wk-prog]' ? cell : null) }
+    });
+    // 不展开 dom：它的 pop 是 getter，spread 会在当时取一次值（永远是 null）
+    return { dom, sched, deps, api, cell, clickCell };
+  };
+
+  it('点格子弹出输入层，默认值 = 当前百分比', () => {
+    const s = setup(40);
+    s.clickCell();
+    expect(s.dom.pop).toBeTruthy();
+    // 默认值写在弹层模板里（替身的 input 不会解析 innerHTML，故直接断言模板）
+    expect(s.dom.pop.innerHTML).toContain('value="40"');
+    expect(s.dom.pop.innerHTML).toContain('data-wkp-set="50"');
+    expect(s.dom.pop.style.left).toBe('100px');
+  });
+
+  it('保存 → setProgress(taskId, pct) + 重绘 + 成功提示', () => {
+    const s = setup(40);
+    s.clickCell();
+    s.dom.ok.click();
+    expect(s.sched.setProgress).toHaveBeenCalledWith('t1', 40);
+    expect(s.deps.render).toHaveBeenCalled();
+    expect(s.deps.onSyncStatus).toHaveBeenCalledWith('ok', { msg: '完成度已更新为 40%' });
+  });
+
+  it('越界输入被钳制（140 → 100，-5 → 0）', () => {
+    const hi = setup(100);
+    hi.clickCell(); hi.dom.input.value = '140'; hi.dom.ok.click();
+    expect(hi.sched.setProgress).toHaveBeenCalledWith('t1', 100);
+
+    const lo = setup(0);
+    lo.clickCell(); lo.dom.input.value = '-5'; lo.dom.ok.click();
+    expect(lo.sched.setProgress).toHaveBeenCalledWith('t1', 0);
+  });
+
+  it('被守卫拦下（setProgress 返回 null）→ 失败提示，不重绘', () => {
+    const s = setup(null);
+    s.clickCell();
+    s.dom.ok.click();
+    expect(s.deps.render).not.toHaveBeenCalled();
+    expect(s.deps.onSyncStatus).toHaveBeenCalledWith('fail', { msg: '无法修改该任务的完成度' });
+  });
+
+  it('档位与步进只改输入框，不立刻提交', () => {
+    const s = setup(50);
+    s.clickCell();
+    s.dom.presets[3].click();                 // 75%
+    expect(s.dom.input.value).toBe(75);
+    s.dom.dials[1].click();                   // +5
+    expect(s.dom.input.value).toBe(80);
+    expect(s.sched.setProgress).not.toHaveBeenCalled();
+  });
+
+  it('Esc / 取消关闭不保存', () => {
+    const s = setup(40);
+    s.clickCell();
+    s.dom.input._h.keydown({ key: 'Escape', preventDefault() {} });
+    expect(s.sched.setProgress).not.toHaveBeenCalled();
   });
 });

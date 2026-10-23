@@ -30,7 +30,7 @@ import { isFeishuEnabled } from './services/backend.js';
 import { getSession, getUser, getProfile } from './services/auth.js';
 import { getProject } from './services/projects.js';
 import { createPlanSync } from './services/plan-sync.js';
-import { resolveAccess, ACCESS } from './utils/permission.js';
+import { resolveAccess, ACCESS, ctxOf } from './utils/permission.js';
 import { refreshUI as refreshReadonlyUI } from './utils/readonly.js';
 
 // 解析项目参数
@@ -119,7 +119,19 @@ function boot() {
     workday,
     today: new Date(),
     holidays: defaultHolidays(),
-    toggleReportExpanded
+    toggleReportExpanded,
+    // 资源工作视图的进度编辑口径（spec §9.1）：
+    //   full  → 所有行（含未分配）
+    //   collab → 只有 res 含我名字的行
+    //   readonly → 无
+    // 刻意比全局口径更窄：未分配任务在本页只读（认领请去甘特图）。
+    // 注意这是"前端比服务端更严"：服务端 bar_owned 对 res:[] 是放行的，别误判成服务端漏判。
+    canEditProgress: t => {
+      const c = ctxOf(userStore.state);
+      if (c.access === 'full') return true;
+      if (c.access !== 'collab') return false;
+      return !!t.res && t.res.includes(c.rname);
+    }
   };
   let lastCtx = null;
   function buildCtx(sc) {

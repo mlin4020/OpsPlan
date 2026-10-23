@@ -113,8 +113,19 @@ function taskRow(t, ctx, deps) {
     <span class="rwk-pri">${priorityBadge(deps.modPri[t.mod])}</span>
     <span class="tag rwk-state" style="background:${st.color}" title="${esc(t.mod)} · ${esc(name)}：${st.text}">${st.text}</span>
     <span class="rwk-dates" title="${dates} · ${work} 人日">${dates}<i>${work} 人日</i></span>
-    <span class="rwk-prog" title="完成度 ${pct}%"><span class="rwk-bar"><i style="width:${pct}%;background:${fill}"></i></span><b class="rwk-pct">${pct}%</b></span>
+    ${progCell(t, pct, fill, deps)}
   </div>`;
+}
+
+// 进度格：只有可编辑的行才带 data-wk-prog。
+// 不可编辑的行连属性都不渲染 —— 从 DOM 层面保证点不动，而不是"渲染了再在事件里判断后 return"
+// （后者留下一个假的可点区域，用户会反复点）。命中区是整格（含百分比数字）：
+// pct=0 时进度条填充宽为 0，若只让填充可点就永远点不着。
+function progCell(t, pct, fill, deps) {
+  const canEdit = typeof deps.canEdit === 'function' && deps.canEdit(t);
+  return `<span class="rwk-prog${canEdit ? ' is-edit' : ''}"${
+    canEdit ? ` data-wk-prog="${esc(t.id)}" data-wk-done="${pct}" role="button" tabindex="0"` : ''
+  } title="${canEdit ? '点击修改完成度' : `完成度 ${pct}%`}"><span class="rwk-bar"><i style="width:${pct}%;background:${fill}"></i></span><b class="rwk-pct">${pct}%</b></span>`;
 }
 
 // 人名的点击筛选入口：点一下只看这个人，再点一下回到全部 ——
@@ -171,7 +182,11 @@ export function renderWorkView(container, ctx) {
   const filtering = isWorkFilterActive(filter);
   const scope = personScope(filter);
   const fDeps = { today, modPri };
-  const deps = { modPri, modColors: ctx.modColors, filter };
+  // 可编辑口径由入口注入（spec §9.1）：full 全部 · collab 只有 res 含自己 · 未注入一律 false。
+  // 刻意走 ctx 注入而不是在视图里 import userStore：
+  //   视图要保持可脱离浏览器渲染（导出单文件就没有 userStore 的状态），不注入即安全只读
+  const canEditProgress = typeof ctx.canEditProgress === 'function' ? ctx.canEditProgress : () => false;
+  const deps = { modPri, modColors: ctx.modColors, filter, canEdit: canEditProgress };
 
   // 口径第一刀：归档需求的任务整条剔除（人只列"还要干的活"，指标与清单一次性同口径）。
   // 归档是软状态，数据仍留在 state.modules 里 —— 想看历史去「归档」页，本页不重复呈现。
