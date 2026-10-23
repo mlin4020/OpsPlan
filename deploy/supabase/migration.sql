@@ -484,3 +484,35 @@ $$;
 -- 只给登录用户可执行（游客本来就只读，不需要）
 revoke all on function public.save_plan(uuid, jsonb) from public;
 grant execute on function public.save_plan(uuid, jsonb) to authenticated;
+
+-- ---------- 5.6 资源库人名候选 ----------
+-- 用途：用户管理页"对应人员"输入框的 datalist 候选（Task 16）。
+-- 为什么必须给候选：resource_name 拼错的人会"什么都改不了"，而且从界面上完全看不出
+-- 是拼错了还是没配 —— 这是本次最难排查的故障形态。
+-- 来源：各项目 plan 里资源库的 name + 任务 res 里出现过的名字（含资源库外的孤儿名）。
+create or replace function public.list_resource_names()
+returns table(name text)
+language sql
+security definer set search_path = public
+stable
+as $$
+  select distinct nm
+    from (
+      -- 资源库里的人
+      select r->>'name' as nm
+        from public.projects p,
+             jsonb_array_elements(coalesce(p.plan->'resources','[]'::jsonb)) r
+      union
+      -- 任务 res 里出现过的名字（含已从资源库删掉、但任务上还留着的孤儿名）
+      select e as nm
+        from public.projects p,
+             jsonb_array_elements(coalesce(p.plan->'modules','[]'::jsonb)) m,
+             jsonb_array_elements(coalesce(m->'bars','[]'::jsonb)) b,
+             jsonb_array_elements_text(coalesce(b->>'res','[]')::jsonb) e
+    ) t
+   where nm is not null and btrim(nm) <> ''
+   order by nm;
+$$;
+
+-- 所有登录用户都要读（项目列表页的管理员面板用它；非管理员拿到的候选也无害）
+grant execute on function public.list_resource_names() to authenticated;
