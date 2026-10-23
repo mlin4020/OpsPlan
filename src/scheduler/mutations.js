@@ -13,13 +13,48 @@ import { PNAME, MODULE_PHASES, MODULE_MILESTONE_PHASES, PRIORITY_DEFAULT, normal
 import { milestoneName } from '../core/mod-tag.js';
 import { newVersionId, versionOfMap, versionOfMod, isGoMs, findGoMs } from '../core/versions.js';
 import { userStore } from '../store/user-store.js';
+import { ctxOf, canPlan, canTouchTask, canEditTask, canManageModule, canEditModuleFields,
+         canEditVersion, canDeleteVersion, canArchiveVersionMods, canEditResources } from '../utils/permission.js';
 
-// 只读守卫：编辑类入口统一从这里过（throw 语义用于"新增"类，其余静默 return）
-export function assertEditable(throwing) {
-  if (!userStore.state.readonly) return true;
+// 判定上下文：从 userStore.state 派生（access / rname / role）
+function permCtx() { return ctxOf(userStore.state); }
+
+// 按目标粒度的守卫（设计文档 §8.3）。
+//   throw 语义用于"新增"类（UI 会因此弹错）；其余静默 return，与改造前一致。
+//   不带 target 时取最严（等价 canPlan = 仅全权用户）。
+//   target 形态：
+//     { kind:'task',      task }                 普通任务（按 res 判定）
+//     { kind:'milestone', ms, mo }               里程碑（按需求归属判定）
+//     { kind:'taskNew',   mod, res }             新增任务（看它打算派给谁）
+//     { kind:'moduleFields' }                    需求字段级
+//     { kind:'module',    mo }                   需求归属级（改名/删除/归档/转交）
+//     { kind:'moduleNew' }                       新增需求
+//     { kind:'version' } / { kind:'versionDelete' } / { kind:'versionArchive' }
+//     { kind:'resources' } / { kind:'plan' }
+export function assertEditable(throwing, target) {
+  const c = permCtx();
+  let ok;
+  switch (target && target.kind) {
+    case 'task':          ok = canEditTask(target.task, c); break;
+    case 'milestone':     ok = canTouchTask(target.ms, target.mo, c); break;
+    case 'taskNew':       ok = canEditTask({ res: target.res }, c); break;
+    case 'moduleFields':  ok = canEditModuleFields(c); break;
+    case 'module':        ok = canManageModule(target.mo, c); break;
+    case 'moduleNew':     ok = canEditModuleFields(c); break;
+    case 'version':       ok = canEditVersion(c); break;
+    case 'versionDelete': ok = canDeleteVersion(c); break;
+    case 'versionArchive':ok = canArchiveVersionMods(c); break;
+    case 'resources':     ok = canEditResources(c); break;
+    case 'plan':
+    default:              ok = canPlan(c);
+  }
+  if (ok) return true;
   if (throwing) throw new Error('只读模式，无法修改');
   return false;
 }
+
+// 给测试与调用方用的导出（保持既有只读语义的回归用例可读）
+export { permCtx };
 
 export function createMutations(ctx) {
   const { getState, setState, W } = ctx;
@@ -54,6 +89,15 @@ export function createMutations(ctx) {
     return null;
   }
 
+  // 里程碑守卫：里程碑没有 res，若按 { kind:'task' } 判会被当成"未分配任务"而放行；
+  // 它的权限跟的是**需求归属**（canEditMilestone = canManageModule(mo)），必须走 milestone 分支。
+  // 定位不到任务条时退回最严（不带 target），与"漏传 target"同口径，绝不隐式放行。
+  function msGuard(id) {
+    const raw = findRawBar(id);
+    if (!raw) return assertEditable(false);
+    return assertEditable(false, { kind: 'milestone', ms: raw, mo: findMod(raw) });
+  }
+
   // 通用数组内移动：把 src 元素移动到 to 元素之前/之后（splice 索引修正）
   function moveInArray(arr, fromIdx, toIdx, before) {
     const [item] = arr.splice(fromIdx, 1);
@@ -77,8 +121,15 @@ export function createMutations(ctx) {
   //   普通任务 = 周期 dur（结束 = 开始 + dur - 1）；manual 锁定日期，auto 由引擎重排并级联后置
   //   mod/p = 归属变更（抽屉编辑改需求/阶段）：跨需求移动时 id 不变，依赖引用不受影响
   function saveTask(taskId, draft) {
-    if (!assertEditable()) return;
     const raw = findRawBar(taskId);   // 始终操作原始对象，保证持久化与里程碑一致性
+    // 新增分支（raw 为空、committed 还没推入 bars）按"打算派给谁"判定；
+    // 编辑分支按"这条任务现在归谁"判定 —— 注意用 old 的 res，不能用 draft.res，
+    // 否则协作者把自己的任务 res 改成别人就能绕过（改完就成别人的了，本不该允许改）
+    const isNew = !raw;
+    const guard = isNew
+      ? { kind: 'taskNew', res: (draft && draft.res) || [] }
+      : { kind: 'task', task: raw };
+    if (!assertEditable(isNew, guard)) return;
     if (!raw) return;
     // 类型判定：draft 未显式带 type 时（如"新建后补写依赖"这类局部更新）必须沿用任务原始类型。
     // 否则里程碑会被当成"转成普通任务"处理 → delete raw.m 降级成任务，且 res 未初始化，
@@ -148,7 +199,7 @@ export function createMutations(ctx) {
 
   // 里程碑：拖拽落位（仅调整上线日期 m）
   function moveMilestone(msId, newDate) {
-    if (!assertEditable()) return;
+    if (!msGuard(msId)) return;
     let target = null;
     getState().modules.forEach(mo => mo.bars.forEach(b => {
       if (b.m && b.id === msId) target = b;
@@ -161,7 +212,7 @@ export function createMutations(ctx) {
 
   // 里程碑：通过抽屉编辑上线日期
   function setMilestoneDate(msId, dateStr) {
-    if (!assertEditable()) return;
+    if (!msGuard(msId)) return;
     let target = null;
     getState().modules.forEach(mo => mo.bars.forEach(b => {
       if (b.m && b.id === msId) target = b;
@@ -174,7 +225,7 @@ export function createMutations(ctx) {
 
   // 需求排序：把 fromName 需求（连同其全部任务阶段）移动到 toName 需求之前/之后
   function moveModule(fromName, toName, before) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'moduleFields' })) return;
     const mods = getState().modules || [];
     const fromIdx = mods.findIndex(m => m.name === fromName);
     const toIdx = mods.findIndex(m => m.name === toName);
@@ -185,7 +236,7 @@ export function createMutations(ctx) {
 
   // 任务阶段排序：把 taskId 对应任务条移动到 toTaskId 之前/之后（仅限同一需求内）
   function moveBar(taskId, toTaskId, before) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'moduleFields' })) return;
     const raw = findRawBar(taskId);
     if (!raw) return;
     const mo = findMod(raw);
@@ -200,7 +251,7 @@ export function createMutations(ctx) {
   // 切换任务类型：普通任务 <-> 里程碑（委托 saveTask，保证语义一致）
   // 里程碑为 0 天周期的单点时间，仅含一个上线日期（b.m），代表某个时间点
   function changeTaskType(taskId, toMs, dateStr) {
-    if (!assertEditable()) return;
+    if (!msGuard(taskId)) return;
     const raw = findRawBar(taskId);
     if (!raw) return;
     saveTask(taskId, {
@@ -214,7 +265,7 @@ export function createMutations(ctx) {
 
   // 重命名任务：普通任务改 name，里程碑改 label；传空字符串则清除自定义名回退默认
   function renameTask(taskId, name) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'task', task: findRawBar(taskId) })) return;
     const raw = findRawBar(taskId);
     if (!raw) return;
     const n = (name == null ? '' : String(name)).trim();
@@ -225,7 +276,7 @@ export function createMutations(ctx) {
 
   // 删除任务：从所属需求的 bars 中移除，同时清理其他任务对该任务的依赖引用，重建索引并持久化
   function deleteTask(taskId) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'task', task: findRawBar(taskId) })) return;
     const raw = findRawBar(taskId);
     if (!raw) return;
     const mo = findMod(raw);
@@ -243,7 +294,8 @@ export function createMutations(ctx) {
   // 新增任务：opts = { mod, p, name?, type:'task'|'ms', start, dur?, res?, manual }
   //   普通任务 = 周期 dur（默认 1 天），里程碑 = 单点上线日 m；返回新任务 id
   function addTask(opts) {
-    assertEditable(true);  // 只读模式下新增任务抛错
+    // 按"打算派给谁"判定：未分配（res 为空）的任务协作者也能建
+    assertEditable(true, { kind: 'taskNew', res: opts.res });
     const mo = (getState().modules || []).find(m => m.name === opts.mod);
     if (!mo) throw new Error('需求不存在：' + opts.mod);
     const p = opts.p || 'dev';
@@ -279,7 +331,7 @@ export function createMutations(ctx) {
   // 新增需求：自动创建所选阶段任务和里程碑（opts.autoCreate = false 可跳过，仅创建空需求）
   // opts.phases: 可选，指定要初始化的阶段 key 数组（按传入顺序创建）。缺省时初始化全部阶段。
   function addModule(opts) {
-    assertEditable(true);  // 只读模式下新增需求抛错
+    assertEditable(true, { kind: 'moduleNew' });  // 只读模式下新增需求抛错
     const name = (opts.name || '').trim();
     if (!name) throw new Error('需求名称不能为空');
     if ((getState().modules || []).some(m => m.name === name)) throw new Error('需求已存在：' + name);
@@ -381,9 +433,19 @@ export function createMutations(ctx) {
   // 修改需求信息：支持改名称/标签/颜色/优先级/描述/需求文档
   // 改名时会同步更新该需求下全部任务条的 mod 引用（collect 写回），保证依赖索引一致
   function updateModule(opts) {
-    if (!assertEditable()) return;
     const mo = (getState().modules || []).find(m => m.name === (opts.oldName || opts.name));
     if (!mo) return;
+
+    // 归属级字段（改名 / 转交归属）单独把关，错误信息要指对方向 ——
+    // 混在字段级里会报成笼统的"只读模式"，用户不知道是哪一步被拦了
+    const c = permCtx();
+    const renaming = opts.name != null && (opts.name || '').trim() !== mo.name;
+    if ((renaming || 'owner' in opts) && !canManageModule(mo, c)) {
+      throw new Error(renaming
+        ? '无权重命名该需求：该需求不是你创建的'
+        : '无权转交该需求：该需求不是你创建的');
+    }
+    if (!assertEditable(false, { kind: 'moduleFields' })) return;
     if (opts.name != null) {
       const newName = (opts.name || '').trim();
       if (!newName) throw new Error('需求名称不能为空');
@@ -454,9 +516,9 @@ export function createMutations(ctx) {
   // 归档 / 取消归档需求：归档需求数据保留在 state.modules 中（导出/同步/撤销不丢数据），
   // 仅由渲染层过滤，不再出现在排期视图中；归档后需求只读，需先取消归档才能继续编辑其任务。
   function archiveModule(name, archived) {
-    if (!assertEditable()) return null;
     const mo = (getState().modules || []).find(m => m.name === name);
     if (!mo) return null;
+    if (!assertEditable(false, { kind: 'module', mo })) return null;
     mo.archived = !!archived;
     mo.archivedAt = archived ? new Date().toISOString() : null;
     ctx.collect();
@@ -466,11 +528,11 @@ export function createMutations(ctx) {
 
   // 删除需求及其全部任务；同时清理其他需求任务对该需求、以及该需求各任务互相/对外部的依赖引用
   function deleteModule(name) {
-    if (!assertEditable()) return;
     const mods = getState().modules || [];
     const idx = mods.findIndex(m => m.name === name);
     if (idx < 0) return;
     const mo = mods[idx];
+    if (!assertEditable(false, { kind: 'module', mo })) return;
     const goneIds = new Set(mo.bars.map(b => b.id));
     mods.splice(idx, 1);
     // 版本成员用需求名引用 → 需求被删时同步清理，避免版本卡里挂着一个不存在的成员
@@ -586,7 +648,7 @@ export function createMutations(ctx) {
 
   // 新建版本：名称唯一、上线日必填；opts.mods 可一次性带上成员（弹窗里勾选）
   function createVersion(opts) {
-    assertEditable(true);  // 只读模式下新增版本抛错
+    assertEditable(true, { kind: 'version' });  // 只读模式下新增版本抛错
     const name = ((opts && opts.name) || '').trim();
     if (!name) throw new Error('版本名称不能为空');
     if (!opts.date) throw new Error('请选择上线日');
@@ -604,7 +666,7 @@ export function createMutations(ctx) {
 
   // 修改版本：改名 / 改期 / 改成员名单（三者共用同一个弹窗）
   function updateVersion(id, patch) {
-    if (!assertEditable()) return null;
+    if (!assertEditable(false, { kind: 'version' })) return null;
     const v = findVersionRaw(id);
     if (!v) return null;
     const p = patch || {};
@@ -639,7 +701,7 @@ export function createMutations(ctx) {
 
   // 标记已上线 / 取消标记。实际发版日期可传（缺省今天）——「计划 vs 实际」是版本管理最有用的一个数
   function shipVersion(id, shipped, shippedAt) {
-    if (!assertEditable()) return null;
+    if (!assertEditable(false, { kind: 'version' })) return null;
     const v = findVersionRaw(id);
     if (!v) return null;
     v.shipped = !!shipped;
@@ -650,7 +712,7 @@ export function createMutations(ctx) {
 
   // 删除版本：成员全部解锁（上线日回到自动跟随任务链），版本本身移除
   function deleteVersion(id) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'versionDelete' })) return;
     const list = versions();
     const idx = list.findIndex(v => v && v.id === id);
     if (idx < 0) return;
@@ -684,7 +746,7 @@ export function createMutations(ctx) {
   // 于是必须先移出再移入 —— 那正是这里要替用户省掉的两步。
   // 返回 { from, to, changed }，供调用方出提示文案。
   function setModuleVersion(name, versionId) {
-    if (!assertEditable()) return null;
+    if (!assertEditable(false, { kind: 'version' })) return null;
     const mo = modByName(name);
     if (!mo) return null;
     const cur = versionOfMod(getState(), name);
@@ -716,7 +778,7 @@ export function createMutations(ctx) {
   // 一键归档本版本的全部需求：刻意**不**在"标记上线"时自动执行 ——
   // 上线后用户往往还要看几天进度，自动收口会让人找不到需求。返回实际归档的数量。
   function archiveVersionMods(id) {
-    if (!assertEditable()) return 0;
+    if (!assertEditable(false, { kind: 'versionArchive' })) return 0;
     const v = findVersionRaw(id);
     if (!v) return 0;
     const at = new Date().toISOString();
@@ -732,7 +794,7 @@ export function createMutations(ctx) {
 
   // 拖拽调整工作量（持续时间）：edge='l' 拖左边缘改开始日期，edge='r' 拖右边缘改结束日期；锁定手动并级联重算后置
   function resizeTask(taskId, edge, date) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
     if (!t || t.isMs) return;
     const nd = F(date);
@@ -762,7 +824,7 @@ export function createMutations(ctx) {
   }
 
   function updateResource(id, patch) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'resources' })) return;
     const r = (getState().resources || []).find(x => x.id === id);
     if (!r) return;
     if (patch.name != null && patch.name !== r.name) {
@@ -775,7 +837,7 @@ export function createMutations(ctx) {
   }
 
   function addResource(res) {
-    if (!assertEditable()) return null;
+    if (!assertEditable(false, { kind: 'resources' })) return null;
     if (!getState().resources) setState({ resources: [] });
     const r = {
       id: res.id || ('res_' + Date.now().toString(36)),
@@ -789,7 +851,7 @@ export function createMutations(ctx) {
   }
 
   function deleteResource(id) {
-    if (!assertEditable()) return;
+    if (!assertEditable(false, { kind: 'resources' })) return;
     if (!getState().resources) return;
     const r = getState().resources.find(x => x.id === id);
     if (!r) return;

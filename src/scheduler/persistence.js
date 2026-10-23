@@ -94,7 +94,7 @@ export function createPersistence(ctx) {
   }
 
   function importJSON(json) {
-    ctx.assertEditable(true);  // 只读模式下导入抛错
+    ctx.assertEditable(true, { kind: 'plan' });  // 只读模式下导入抛错
     const data = typeof json === 'string' ? JSON.parse(json) : json;
     if (!data || !Array.isArray(data.modules) || !data.modules.length) throw new Error('无效的排期数据文件');
     setState({ modules: data.modules });
@@ -109,7 +109,7 @@ export function createPersistence(ctx) {
 
   // 重置为数据文件默认值
   function resetToDefault() {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'plan' })) return;
     localStorage.removeItem(ctx.KEY());
     setState({ modules: ctx.DEFAULT_MODULES, resources: ctx.DEFAULT_RESOURCES, versions: [] });
     ctx.collect();

@@ -148,7 +148,7 @@ export function createPlanning(ctx) {
   // ---------- 对外操作 ----------
   // 一键自动计划：全量重排所有自动任务
   function computeSchedule() {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'plan' })) return;
     const affected = new Set(ctx.tasks.filter(t => !t.manual).map(t => t.id));
     recomputeAffected(affected);
     ctx.save();
@@ -157,7 +157,7 @@ export function createPlanning(ctx) {
   // 拖拽落位：锁定手动日期并级联重算后置子图。
   // 关键语义：工作量（工作日数）恒定，时间周期（日历天数）随新位置含有的周末/节假日自动伸缩。
   function cascade(anchorId, newStart) {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(anchorId) })) return;
     const t = ctx.getTask(anchorId);
     if (!t || t.isMs) return;
     t.manual = true;
@@ -172,7 +172,7 @@ export function createPlanning(ctx) {
 
   // 自动调整至资源可用的时间：解除锁定并重排该任务及其后置子图
   function resolveAuto(taskId) {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
     if (!t) return;
     t.manual = false;
@@ -183,7 +183,7 @@ export function createPlanning(ctx) {
 
   // 忽略：保留现状并淡化标记
   function resolveIgnore(taskId) {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
     if (!t) return;
     t.ignore = true;
@@ -192,7 +192,7 @@ export function createPlanning(ctx) {
 
   // 撤销忽略
   function unignore(taskId) {
-    if (!ctx.assertEditable()) return;
+    if (!ctx.assertEditable(false, { kind: 'task', task: ctx.getTask(taskId) })) return;
     const t = ctx.getTask(taskId);
     if (t) { t.ignore = false; ctx.save(); }
   }

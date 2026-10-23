@@ -8,7 +8,7 @@
 // loadFromServer/pushToServer 由外部注入的 sync 提供；未注入时 resolve false（本地兜底）
 // ============================================================
 import { createPlanning } from './planning.js';
-import { createMutations } from './mutations.js';
+import { createMutations, assertEditable } from './mutations.js';
 import { detectProblems } from './problems.js';
 import { createPersistence } from './persistence.js';
 import { createCycle } from './cycle.js';
@@ -92,12 +92,16 @@ export function createScheduler({ planStore, userStore, W, sync }) {
   cycle.apply();
 
   // 撤销/重做
+  // 数据层守卫：回滚的是**整份 plan 快照**，会连带回滚别人的改动 → 仅全权用户可操作。
+  // 原先只靠按钮 disabled，但那只是 UI 层，快捷方式/程序化调用绕得过去。
   function undo() {
+    if (!assertEditable(false, { kind: 'plan' })) return false;
     const ok = history.undo();
     if (ok) cycle.apply();
     return ok;
   }
   function redo() {
+    if (!assertEditable(false, { kind: 'plan' })) return false;
     const ok = history.redo();
     if (ok) cycle.apply();
     return ok;

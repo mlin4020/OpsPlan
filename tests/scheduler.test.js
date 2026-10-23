@@ -945,3 +945,124 @@ describe('scheduler: 需求归属 owner', () => {
     expect(planStore.state.modules.find(m => m.name === '官网改版').owner).toBe('张三');
   });
 });
+
+describe('scheduler: 按目标粒度的守卫', () => {
+  beforeEach(() => { planStore.reset(); userStore.reset(); });
+
+  // 造一个"协作者"上下文：access 显式设成 collab，人名张三
+  const asCollab = () => userStore.set({ readonly: false, access: 'collab', resourceName: '张三' });
+  const asFull = () => userStore.set({ readonly: false, access: 'full', resourceName: '张三' });
+
+  it('协作者不能改别人负责的任务（静默不生效 + 可 throw 语义）', () => {
+    const sched = makeSched();
+    asCollab();
+    // m1-sit 的 res 是 ["吴十"]，不归张三
+    sched.saveTask('m1-sit', { name: '偷改' });
+    expect(sched.getTask('m1-sit').name).not.toBe('偷改');
+  });
+
+  it('协作者能改自己负责的任务', () => {
+    const sched = makeSched();
+    asCollab();
+    // m1-req 的 res 是 ["张三"]
+    sched.saveTask('m1-req', { name: '我的任务' });
+    expect(sched.getTask('m1-req').name).toBe('我的任务');
+  });
+
+  it('协作者能改未分配的任务（res 为空数组）', () => {
+    const sched = makeSched();
+    asCollab();
+    sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1, res: [] });
+    const t = sched.tasks().filter(x => !x.isMs && (x.res || []).length === 0).pop();
+    sched.saveTask(t.id, { name: '待认领的活' });
+    expect(sched.getTask(t.id).name).toBe('待认领的活');
+  });
+
+  it('协作者不能动资源库', () => {
+    const sched = makeSched();
+    asCollab();
+    const before = planStore.state.resources.length;
+    sched.addResource({ name: '新人' });
+    expect(planStore.state.resources.length).toBe(before);
+  });
+
+  it('协作者不能动里程碑（含自己需求里的：因为需求 owner 不是他）', () => {
+    const sched = makeSched();
+    asCollab();
+    // 默认数据的「官网改版」没有 owner 字段 = 无主 → 协作者对它没有归属权
+    const ms = sched.getTask('m1-cfm');
+    expect(ms).toBeTruthy();
+    sched.moveMilestone('m1-cfm', '2026-10-01');
+    expect(sched.getTask('m1-cfm').m).not.toBe('2026-10-01');
+  });
+
+  // ⚠️ 这里刻意分成"无主"与"自己的"两条，因为它们的**权限结论相反**。
+  //   决策 §1.1-13 是「需求创建人有该需求所有权限（改名/删除/归档/转交）」，
+  //   所以归属人可以给自己需求改名/归档；无主需求才轮不到协作者。
+  //   （初版这里写成"协作者不能给自己需求改名/归档"，与设计直接冲突，属计划缺陷，2026-10-23 修正。）
+  it('协作者对**无主需求**不能改名（归档已由下一条覆盖）', () => {
+    const sched = makeSched();
+    asCollab();
+    // 默认数据的「官网改版」没有 owner 字段 = 无主 → 协作者对它没有归属权
+    expect(() => sched.updateModule({ name: '改名', oldName: '官网改版' })).toThrow();
+    expect(planStore.state.modules.some(m => m.name === '官网改版')).toBe(true);   // 没被改掉
+  });
+
+  it('协作者能改**自己的需求**的字段，也能改名 / 归档（需求创建人全权）', () => {
+    const sched = makeSched();
+    asCollab();
+    sched.addModule({ name: '我的需求', autoCreate: false });   // owner = 张三
+    // 字段级
+    sched.updateModule({ name: '我的需求', pri: 'P0' });
+    expect(planStore.state.modules.find(m => m.name === '我的需求').pri).toBe('P0');
+    // 归属级：改名（需求创建人有权）
+    sched.updateModule({ oldName: '我的需求', name: '我的需求V2' });
+    expect(planStore.state.modules.some(m => m.name === '我的需求V2')).toBe(true);
+    // 归属级：归档（同上）
+    sched.archiveModule('我的需求V2', true);
+    expect(!!planStore.state.modules.find(m => m.name === '我的需求V2').archived).toBe(true);
+  });
+
+  it('协作者能改无主需求的字段，但不能归档它', () => {
+    const sched = makeSched();
+    asCollab();
+    sched.updateModule({ name: '官网改版', pri: 'P0' });
+    expect(planStore.state.modules.find(m => m.name === '官网改版').pri).toBe('P0');
+    sched.archiveModule('官网改版', true);
+    expect(!!planStore.state.modules.find(m => m.name === '官网改版').archived).toBe(false);
+  });
+
+  it('协作者不能动版本删除与一键归档，但能改版本', () => {
+    const sched = makeSched();
+    asCollab();
+    const v = sched.createVersion({ name: '9月版', date: '2026-09-30' });
+    const vid = v.version.id;
+    sched.shipVersion(vid, true, '2026-09-30');
+    expect(planStore.state.versions.find(x => x.id === vid).shipped).toBe(true);
+    sched.deleteVersion(vid);
+    expect(planStore.state.versions.some(x => x.id === vid)).toBe(true);   // 没被删掉
+  });
+
+  it('协作者不能一键自动计划 / 撤销 / 导入', () => {
+    const sched = makeSched();
+    asCollab();
+    const before = JSON.stringify(planStore.state.modules);
+    sched.computeSchedule();
+    expect(JSON.stringify(planStore.state.modules)).toBe(before);
+  });
+
+  it('全权用户不受影响（回归）', () => {
+    const sched = makeSched();
+    asFull();
+    sched.saveTask('m1-sit', { name: '我能改' });
+    expect(sched.getTask('m1-sit').name).toBe('我能改');
+    sched.addResource({ name: '新人' });
+    expect(planStore.state.resources.some(r => r.name === '新人')).toBe(true);
+  });
+
+  it('只读模式仍然全拦（回归）', () => {
+    const sched = makeSched();
+    userStore.set({ readonly: true });
+    expect(() => sched.addTask({ mod: '官网改版', p: 'dev', start: '2026-09-01', dur: 1 })).toThrow('只读模式');
+  });
+});
