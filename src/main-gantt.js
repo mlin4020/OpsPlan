@@ -13,7 +13,7 @@ import { planStore } from './store/plan-store.js';
 import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays, PNAME } from './core/default-data.js';
-import { defaultWorkFilter } from './core/work-filter.js';
+import { loadWorkFilter, saveWorkFilter } from './core/work-filter.js';
 import { defaultReqFilter, defaultReqSort, loadReqView, saveReqView } from './core/mod-query.js';
 import { planRequirementBackfill } from './core/backfill.js';
 
@@ -84,13 +84,18 @@ function boot() {
 
   // 恢复上次的台账查询条件（本机、本项目维度；读不到就是默认值）
   const savedReqView = loadReqView(projectId);
+  // 资源工作视图的筛选条件同样记忆（本机、本项目维度），否则每次进页面都要把
+  // 人员 / 状态 / 优先级重设一遍（与台账那次的诉求同源）
+  const savedWorkFilter = loadWorkFilter(projectId);
 
   // 视图状态（toolbar 读写；renderAll 读取）
   const viewState = {
     view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: 13, archOpen: false,
     // 资源工作视图的筛选条件（人员 / 状态 / 优先级 / 关键词）。放 viewState 而不是写进 URL：
-    // 切换视图来回时不丢，且不污染地址栏；只有 ?me= 这一项刻意走 URL（便于分享"我的任务"链接）
-    workFilter: { ...defaultWorkFilter(), person: meFromQuery },
+    // 切换视图来回时不丢，且不污染地址栏；只有 ?me= 这一项刻意走 URL（便于分享"我的任务"链接）。
+    // 初值来自上次的记忆（本机本项目），但 ?me= 是**本次明确的意图**，优先级高于记忆 ——
+    // 打开"我的任务"链接却看到上次筛的别人，比丢记忆更难解释。
+    workFilter: { ...savedWorkFilter, ...(meFromQuery ? { person: meFromQuery } : {}) },
     // 需求台账的筛选与排序（同样不进 URL：属临时观察状态，切换视图来回不丢）。
     // 但从 localStorage 恢复上次的选择 —— 否则每次打开都要把筛选条件重设一遍
     // （用户反馈的痛点）。按 projectId 隔离：不同项目关注的范围本来就不一样。
@@ -223,9 +228,10 @@ function boot() {
       PNAME,
       today: () => new Date(),
       viewState,
-      // 台账查询条件的持久化（req-page 在筛选/排序变化时调用）
+      // 台账 / 资源工作视图查询条件的持久化（页面在筛选/排序变化时调用）
       projectId,
       saveReqView,
+      saveWorkFilter,
       setDayW: dw => { viewState.dayW = dw; },
       toggleReportExpanded,
       toggleReqExpanded,

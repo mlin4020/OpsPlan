@@ -113,6 +113,36 @@ export function filterWorkTasks(list, filter, deps) {
   return list.filter(t => taskMatchesFilter(t, filter, deps));
 }
 
+// ============================================================
+// 查询条件的记忆（localStorage）
+// ------------------------------------------------------------
+// 与需求台账（core/mod-query.js 的 loadReqView/saveReqView）同一套思路：
+// 存的是"这个人习惯怎么看"，属于界面偏好 —— 不该进 planStore（那会同步给别的使用者），
+// 各人关注点本来就不同。按 projectId 隔离：不同项目关心的范围不一样。
+//
+// 读取一律再过一遍 normalizeWorkFilter：老快照缺字段自动取默认值、脏值被剔除，
+// 不会因为一条历史数据（比如早先某版本留下的状态 key）让整个筛选器永远筛不出东西。
+//
+// 快照版本：**改默认筛选口径时要升一版**（旧快照里的条件分不清是不是用户主动选的）。
+// ============================================================
+const WORK_VIEW_LS = 'opsplan.workView.v1';
+
+function lsRead(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function lsWrite(key, val) { try { localStorage.setItem(key, val); } catch (e) { /* 隐私模式等写入失败，忽略 */ } }
+
+// 读上次的筛选条件；没有 / 解析失败 / 全部非法时回到默认（= 不过滤）
+export function loadWorkFilter(projectId) {
+  const raw = lsRead(WORK_VIEW_LS + ':' + (projectId || 'default'));
+  if (!raw) return defaultWorkFilter();
+  let saved = null;
+  try { saved = JSON.parse(raw); } catch (e) { return defaultWorkFilter(); }
+  return normalizeWorkFilter(saved);
+}
+
+export function saveWorkFilter(projectId, filter) {
+  lsWrite(WORK_VIEW_LS + ':' + (projectId || 'default'), JSON.stringify(normalizeWorkFilter(filter)));
+}
+
 /**
  * 筛选条件的一句话描述（用于清单标题的"已筛选：…"提示）。
  * 空条件不返回空串以外的内容，调用方据此决定是否显示。

@@ -16,7 +16,7 @@ import { planStore } from './store/plan-store.js';
 import { userStore } from './store/user-store.js';
 import { createWorkday } from './core/workday.js';
 import { defaultHolidays } from './core/default-data.js';
-import { defaultWorkFilter } from './core/work-filter.js';
+import { loadWorkFilter, saveWorkFilter } from './core/work-filter.js';
 import { defaultReqFilter, defaultReqSort, loadReqView, saveReqView } from './core/mod-query.js';
 import { expandAllMods } from './core/mod-fold.js';
 import { createScheduler } from './scheduler/index.js';
@@ -100,9 +100,13 @@ function boot() {
   // ---- 渲染 ctx（只读：无 ctxInjection 组件注入） ----
   // ?me=某人：资源工作视图的"看自己"深链，与排期页同一套口径（导出件发给个人时尤其好用）
   const savedReqView = loadReqView('');
+  // 资源工作视图的筛选条件同样记忆（查看器没有 projectId，用 'default' 桶，
+  // 与主应用各项目互不干扰）。?me= 仍然优先于记忆：发给人看的链接要开箱即用。
+  const savedWorkFilter = loadWorkFilter('');
+  const meFromQuery = (params.get('me') || '').trim();
   const viewState = {
     view: viewFromQuery, zoom: 'day', collapsed: {}, dayW: ZOOM_DAYW.day,
-    workFilter: { ...defaultWorkFilter(), person: (params.get('me') || '').trim() },
+    workFilter: { ...savedWorkFilter, ...(meFromQuery ? { person: meFromQuery } : {}) },
     // 需求台账的筛选与排序（查看器里同样可筛可排，只是不能改数据）
     // 同样记忆上次选择：查看器常被反复打开看同一份排期，每次重设筛选很烦。
     // 单文件查看器没有 projectId，用 'default' 桶，与主应用各项目互不干扰。
@@ -140,8 +144,9 @@ function boot() {
   function render(sc) {
     renderAll(buildCtx(sc));
   }
-  // 筛选条事件（共用组件层实现）：查看器没有组件层，这里单独绑一次，否则筛选条点了没反应
-  bindWorkFilter({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render });
+  // 筛选条事件（共用组件层实现）：查看器没有组件层，这里单独绑一次，否则筛选条点了没反应。
+  // saveWorkFilter 一并注入：同一个查看器反复打开时也能记住上次筛的范围。
+  bindWorkFilter({ gantt: baseCtx.gantt, gsc: baseCtx.gsc, viewState, render, saveWorkFilter });
   // 版本页同理：导出件里要能展开/收起版本成员（领导看的就是"这版有哪几个需求"）。
   // 其余入口（新建/编辑/标记上线/删除）在只读下自行失效，无需另写一套只读版。
   bindVersionPage({

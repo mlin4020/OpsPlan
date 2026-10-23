@@ -2,7 +2,7 @@
 //   1) taskStatus 的状态口径（与需求级 moduleTag / isOverdueTask 同源，不能各算一套）
 //   2) renderWorkView 的按人分组、优先级、排序、未分配 / 归档剔除 / 空态处理
 //   3) 接入契约：桌面与手机导航入口、非时间轴视图的工具栏收敛、CSS 顺序与窄屏版式
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ import { defaultModules, defaultResources, defaultHolidays } from '../src/core/d
 import { taskStatus, TASK_STATUS_RANK } from '../src/core/task-status.js';
 import {
   UNASSIGNED, defaultWorkFilter, describeWorkFilter, isWorkFilterActive,
-  normalizeWorkFilter, personScope, taskMatchesFilter
+  loadWorkFilter, normalizeWorkFilter, personScope, saveWorkFilter, taskMatchesFilter
 } from '../src/core/work-filter.js';
 import { renderWorkView } from '../src/views/work-view.js';
 import { bindWorkTask } from '../src/components/work-task.js';
@@ -452,7 +452,7 @@ describe('资源工作视图：接入契约', () => {
     expect(standaloneSrc).toMatch(/bindWorkFilter\(\{ gantt:/);
     // ?me=某人 深链：没有账号↔资源人名的映射，只能靠 URL 参数表达"我是谁"
     expect(ganttSrc).toContain('person: meFromQuery');
-    expect(standaloneSrc).toContain("person: (params.get('me') || '').trim()");
+    expect(standaloneSrc).toContain("const meFromQuery = (params.get('me') || '').trim();");
     // 筛选条件必须经 ctx 传给视图层（放 viewState，切视图来回不丢）
     expect(ganttSrc).toContain('workFilter: viewState.workFilter');
     expect(standaloneSrc).toContain('workFilter: viewState.workFilter');
@@ -663,5 +663,76 @@ describe('work-task: 点击进度格改完成度（Task 12b）', () => {
     s.clickCell();
     s.dom.input._h.keydown({ key: 'Escape', preventDefault() {} });
     expect(s.sched.setProgress).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 查询条件的记忆：与需求台账（core/mod-query.js 的 loadReqView/saveReqView）同一套做法
+// —— localStorage、按 projectId 隔离、脏值一律归一化。
+// ---------------------------------------------------------------------------
+describe('work-filter: 查询条件记忆', () => {
+  // node 环境没有 localStorage，用内存版打桩。
+  // ⚠️ 必须在 afterEach/afterAll 还原：localStorage 是全局对象，直接覆盖会污染同进程的
+  // 其他测试文件（vitest 复用 worker），表现为"单独跑通过、全量跑失败"这种难查的抖动。
+  const store = new Map();
+  const originalLS = globalThis.localStorage;
+  const restore = () => {
+    if (originalLS === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalLS;
+  };
+  beforeEach(() => {
+    store.clear();
+    globalThis.localStorage = {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k)
+    };
+  });
+  afterEach(restore);
+  afterAll(restore);
+
+  it('没存过时返回默认值（= 不过滤）', () => {
+    const f = loadWorkFilter('p1');
+    expect(f).toEqual(defaultWorkFilter());
+    expect(isWorkFilterActive(f)).toBe(false);
+  });
+
+  it('存了能完整还原，且不同项目互不干扰', () => {
+    saveWorkFilter('p1', { q: '登录', person: '张三', states: ['overdue'], pris: ['P0'] });
+    expect(loadWorkFilter('p1')).toEqual({ q: '登录', person: '张三', states: ['overdue'], pris: ['P0'] });
+    // 别的项目读到的是自己的默认值，不会被 p1 的选择带跑
+    expect(isWorkFilterActive(loadWorkFilter('p2'))).toBe(false);
+  });
+
+  it('未分配（UNASSIGNED）也是普通取值，照常记住', () => {
+    saveWorkFilter('p1', { ...defaultWorkFilter(), person: UNASSIGNED });
+    expect(personScope(loadWorkFilter('p1'))).toBe('unassigned');
+  });
+
+  it('脏值 / 坏 JSON 一律回落，绝不让筛选器永远筛不出东西', () => {
+    store.set('opsplan.workView.v1:p1', JSON.stringify({ q: 1, person: '张三', states: ['overdue', 'nope'], pris: ['P9'] }));
+    const f = loadWorkFilter('p1');
+    expect(f.q).toBe('1');                  // 非字符串会被 String() 归一，而不是整份作废
+    expect(f.states).toEqual(['overdue']);  // 已不存在的状态 key 被剔除
+    expect(f.pris).toEqual([]);             // 非法优先级剔除
+    store.set('opsplan.workView.v1:p2', '{不是 JSON');
+    expect(isWorkFilterActive(loadWorkFilter('p2'))).toBe(false);
+  });
+
+  it('localStorage 不可用（隐私模式 / file://）时静默降级', () => {
+    delete globalThis.localStorage;
+    expect(isWorkFilterActive(loadWorkFilter('p1'))).toBe(false);
+    expect(() => saveWorkFilter('p1', { ...defaultWorkFilter(), q: 'x' })).not.toThrow();
+  });
+
+  it('入口层读回记忆、组件层落盘（两个入口都要，导出查看器用 default 桶）', () => {
+    expect(ganttSrc).toContain('loadWorkFilter(projectId)');
+    // ?me= 是本次明确的意图，优先级高于记忆：打开"我的任务"链接不能看到上次筛的别人
+    expect(ganttSrc).toContain('...(meFromQuery ? { person: meFromQuery } : {})');
+    expect(ganttSrc).toContain('saveWorkFilter,');
+    expect(standaloneSrc).toContain("loadWorkFilter('')");
+    expect(standaloneSrc).toMatch(/bindWorkFilter\(\{[\s\S]*?saveWorkFilter\s*\}\)/);
+    const filterSrc = readFileSync(resolve(ROOT, 'src/components/work-filter.js'), 'utf8');
+    expect(filterSrc).toContain('deps.saveWorkFilter(deps.projectId, cur())');
   });
 });

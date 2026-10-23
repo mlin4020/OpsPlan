@@ -11,6 +11,10 @@
 //
 // 唯一的坑是搜索框：重绘会连带把输入框一起换掉 → 焦点丢失，只能输进去一个字。
 // 故记住光标位置，重绘后还原（输入类交互必须做这一步，否则筛选等于不可用）。
+//
+// 查询条件会按项目记忆（localStorage）：本文件负责每次变更后落盘（防抖 300ms），
+// 入口（main-gantt / main-standalone）负责启动时读回来 —— 见 core/work-filter.js
+// 的 loadWorkFilter / saveWorkFilter。
 // ============================================================
 import { defaultWorkFilter } from '../core/work-filter.js';
 
@@ -26,7 +30,19 @@ export function bindWorkFilter(deps) {
   // 搜索框重绘后要还原的光标位置（null = 本次不需要还原）
   let caret = null;
 
+  // 查询条件的记忆：打字时 300ms 防抖（每敲一个键都写一次 localStorage 没必要），
+  // 换人 / 点 chip / 重置同样走这里落盘。未注入 saveWorkFilter 的入口自然跳过。
+  let persistTimer = null;
+  const persist = () => {
+    if (typeof deps.saveWorkFilter !== 'function') return;
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      deps.saveWorkFilter(deps.projectId, cur());
+    }, 300);
+  };
+
   const apply = (opts) => {
+    persist();
     if (typeof deps.render === 'function') deps.render();
     // 换人 / 重置是"换了个观察范围"：列表会整块重排，留在原滚动位置多半落进空白，
     // 故回到顶部；打字则保持原位（每次敲键都跳顶部会让人没法边打边看）
