@@ -496,7 +496,12 @@ language sql
 security definer set search_path = public
 stable
 as $$
-  select distinct nm
+  -- distinct **btrim**：候选必须归一化去重。
+  --   理由不是"好看"，而是 updateProfile（Task 13）对 resource_name 一律 .trim() 后才入库，
+  --   所以 '  张三  ' 这种候选**永远不可能以原样落库**（选它、存进去就成 '张三'），
+  --   留着它只会让管理员以为存在一个叫"张三 "的人。
+  --   注意：这**不修**既有数据问题——若某任务的 res 里本来就带空格，它仍然匹配不上（bar_owned 是精确相等）。
+  select distinct btrim(nm) as nm
     from (
       -- 资源库里的人
       select r->>'name' as nm
