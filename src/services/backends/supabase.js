@@ -43,7 +43,7 @@ export const supabaseBackend = {
     if (miss) return miss;
     return getClient()
       .from('profiles')
-      .select('id,display_name,role')
+      .select('id,display_name,role,resource_name')
       .eq('id', userId)
       .maybeSingle();
   },

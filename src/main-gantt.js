@@ -30,6 +30,7 @@ import { isFeishuEnabled } from './services/backend.js';
 import { getSession, getUser, getProfile } from './services/auth.js';
 import { getProject } from './services/projects.js';
 import { createPlanSync } from './services/plan-sync.js';
+import { resolveAccess, ACCESS } from './utils/permission.js';
 
 // 解析项目参数
 const params = new URLSearchParams(location.search);
@@ -214,11 +215,21 @@ function boot() {
       hSub.textContent = start + ' → ' + end + ' 整体上线 · 工作组规划器（依赖 / 自动排期 / 资源）';
     }
 
-    // editable 判定：登录用户中 owner 为空 / 本人 / 管理员 可编辑
-    // 游客（未登录，me 为空）一律只读 —— 与 RLS 的 anon 只读策略一致，避免前端可改但服务端拒绝
+    // 访问级别判定（设计文档 §5.1 / §8.2）：
+    //   全权 = 管理员 或 本项目所属人
+    //   协作 = 已登录 且 配了"对应人员"（profile.resource_name）
+    //   只读 = 其余：游客、没配人名的登录用户
+    // 没配人名降级为只读是刻意的：login.html 有公开自助注册入口，
+    // 若"没配人名也能改需求/版本"，任何人注册一个账号就能动别人的需求。
+    // owner_id 为空的历史项目不再一律放行，按上面的身份规则算（否则任何登录用户都能全权改）。
     const me = userStore.state.user;
-    const editable = !!me && (!p || p.owner_id == null || p.owner_id === me.id || me.role === 'admin');
-    if (!editable) userStore.set({ readonly: true });
+    const isOwner = !!me && !!p && p.owner_id === me.id;
+    const access = resolveAccess({
+      role: me ? me.role : 'user',
+      isOwner,
+      resourceName: userStore.state.resourceName
+    });
+    userStore.set({ isOwner, access, readonly: access === ACCESS.READONLY });
 
     // 显示服务器工具栏（返回列表 / 从服务器刷新）
     const serverGroup = document.getElementById('serverGroup');
@@ -259,12 +270,16 @@ function boot() {
       const { data: ud } = await getUser();
       const user = ud && ud.user;
       if (user) {
-        userStore.set({ user: { id: user.id, email: user.email || '' } });
+        // 档案里的 role 与"对应人员"必须一起注入：任务级权限全靠 resource_name，
+        // 少了它协作者会被降级成只读（表现为"我明明配了人名却什么都不能改"）。
+        // role 同时写进 user.role（既有代码从这里读）和顶层 role（ctxOf 从这里读），别只写一处。
         const { data: prof } = await getProfile(user.id);
-        if (prof && prof.role === 'admin') {
-          const u = userStore.state.user;
-          userStore.set({ user: { ...u, role: 'admin' } });
-        }
+        const role = (prof && prof.role) || 'user';
+        userStore.set({
+          user: { id: user.id, email: user.email || '', role },
+          role,
+          resourceName: (prof && prof.resource_name) || ''
+        });
       }
     }
     const { data: proj, error } = await getProject(projectId);

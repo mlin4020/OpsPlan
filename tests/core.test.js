@@ -406,6 +406,22 @@ describe('store/user-store', () => {
     expect(userStore.state.user).toBe(null);
     expect(userStore.state.projectId).toBe(null);
   });
+  it('userStore.reset 清空权限相关字段', () => {
+    userStore.set({ resourceName: '张三', isOwner: true, access: 'collab' });
+    expect(userStore.state.resourceName).toBe('张三');
+    userStore.reset();
+    expect(userStore.state.resourceName).toBe('');
+    expect(userStore.state.isOwner).toBe(false);
+    expect(userStore.state.access).toBe('full');   // 兼容默认：非只读即"能改"
+    expect(userStore.state.readonly).toBe(false);
+    expect(userStore.state.role).toBe('user');
+  });
+  it('初始 state 带权限字段默认值（先装守卫、后放权的前提）', () => {
+    userStore.reset();
+    expect(userStore.state.resourceName).toBe('');
+    expect(userStore.state.isOwner).toBe(false);
+    expect(userStore.state.access).toBe('full');
+  });
   it('subscribe/set 通知', () => {
     let received = null;
     const unsub = userStore.subscribe(s => { received = s; });

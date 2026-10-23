@@ -64,7 +64,10 @@ export const feishuBackend = {
   async getProfile(userId) {
     // 飞书模式下 user 本身就是完整 profile
     const u = getUserFromLS();
-    if (u && u.id === userId) return { data: { role: u.role, display_name: u.display_name }, error: null };
+    // resource_name 必须透出：漏了它飞书模式下所有人都会被降级成只读（见 main-gantt 的 access 计算）
+    if (u && u.id === userId) {
+      return { data: { role: u.role, display_name: u.display_name, resource_name: u.resource_name }, error: null };
+    }
     return { data: null, error: null };
   },
 
